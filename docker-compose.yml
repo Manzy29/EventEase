@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: campustix
+      POSTGRES_USER: campustix
+      POSTGRES_PASSWORD: change_me
+    ports:
+      - "5432:5432"
+    volumes:
+      - campustix-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U campustix -d campustix"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+volumes:
+  campustix-postgres:
