@@ -164,6 +164,7 @@ class Booking(Base):
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     user: Mapped[User] = relationship(back_populates="bookings")
+    event: Mapped[Event] = relationship()
     seats: Mapped[list[BookingSeat]] = relationship(back_populates="booking", cascade="all, delete-orphan")
 
 
@@ -178,6 +179,8 @@ class BookingSeat(Base):
     event_seat_id: Mapped[str] = mapped_column(ForeignKey("event_seats.id"))
     released_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     booking: Mapped[Booking] = relationship(back_populates="seats")
+    event_seat: Mapped[EventSeat] = relationship()
+    ticket: Mapped[Ticket | None] = relationship(back_populates="booking_seat", uselist=False)
 
 
 class Ticket(Base):
@@ -187,6 +190,7 @@ class Ticket(Base):
     ticket_code: Mapped[str] = mapped_column(String(48), unique=True, index=True)
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     status: Mapped[str] = mapped_column(String(20), default="VALID")
+    booking_seat: Mapped[BookingSeat] = relationship(back_populates="ticket")
 
 
 class EmailOutbox(Base):

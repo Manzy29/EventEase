@@ -11,6 +11,9 @@ def create_application() -> FastAPI:
     """Create the FastAPI application without coupling it to a server process."""
     settings = get_settings()
     application = FastAPI(title=settings.app_name)
+    # Credentialed requests cannot use a wildcard origin.  The Vite proxy
+    # makes local requests same-origin, while this also supports a separately
+    # hosted configured frontend.
     application.add_middleware(CORSMiddleware, allow_origins=[settings.frontend_url], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
     application.include_router(api_router, prefix=settings.api_v1_prefix)
 

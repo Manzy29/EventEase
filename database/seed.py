@@ -15,8 +15,8 @@ def main() -> None:
     try:
         if db.query(Venue).filter_by(name="IS Seminar Hall (sample configuration)").first():
             print("Seed data already exists."); return
-        admin = User(full_name="CampusTix Administrator", email="admin@example.test", password_hash=hash_password(admin_password), role=Role.ADMIN, is_email_verified=True)
-        organizer = User(full_name="Computer Society", email="organizer@example.test", password_hash=hash_password(admin_password), role=Role.ORGANIZER, is_email_verified=True)
+        admin = User(full_name="CampusTix Administrator", email="admin@example.com", password_hash=hash_password(admin_password), role=Role.ADMIN, is_email_verified=True)
+        organizer = User(full_name="Computer Society", email="organizer@example.com", password_hash=hash_password(admin_password), role=Role.ORGANIZER, is_email_verified=True)
         categories = [EventCategory(name=name, description=f"{name.title()} campus events") for name in ["TECHNICAL", "CULTURAL", "WORKSHOP", "SEMINAR", "HACKATHON", "SPORTS"]]
         venue = Venue(name="IS Seminar Hall (sample configuration)", location="Information Science Block", description="Demonstration geometry only. Replace with the measured venue layout.")
         db.add_all([admin, organizer, venue, *categories]); db.flush()

@@ -1,6 +1,9 @@
 import axios from 'axios'
 
-export const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1', withCredentials: true })
+// In development Vite proxies this path to FastAPI.  Keeping requests
+// same-origin means the HttpOnly session cookie is sent reliably and avoids
+// having a browser talk to a hard-coded localhost port directly.
+export const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || '/api/v1', withCredentials: true })
 
 export const eventApi = {
   list: (params) => api.get('/events', { params }).then(({ data }) => data),
@@ -8,3 +11,25 @@ export const eventApi = {
   hold: (eventId, event_seat_ids) => api.post(`/events/${eventId}/holds`, { event_seat_ids }).then(({ data }) => data),
   book: (eventId, hold_id) => api.post(`/events/${eventId}/bookings`, { hold_id }).then(({ data }) => data),
 }
+
+export const authApi = {
+  me: () => api.get('/auth/me').then(({ data }) => data),
+  login: (email, password) => api.post('/auth/login', { email, password }).then(({ data }) => data),
+  register: (full_name, email, password) => api.post('/auth/register', { full_name, email, password }).then(({ data }) => data),
+  logout: () => api.post('/auth/logout'),
+}
+
+export const bookingApi = {
+  myBookings: () => api.get('/bookings/me').then(({ data }) => data),
+  cancel: (bookingId) => api.post(`/bookings/${bookingId}/cancel`).then(({ data }) => data),
+}
+
+export const organizerApi = {
+  events: () => api.get('/organizer/events').then(({ data }) => data),
+  attendees: (eventId) => api.get(`/organizer/events/${eventId}/attendees`).then(({ data }) => data),
+  createEvent: (data) => api.post('/organizer/events', data).then(({ data }) => data),
+  venues: () => api.get('/organizer/venues').then(({ data }) => data),
+  categories: () => api.get('/organizer/categories').then(({ data }) => data),
+  claimRole: () => api.post('/organizer/claim-role').then(({ data }) => data),
+}
+

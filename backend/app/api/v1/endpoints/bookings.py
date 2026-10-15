@@ -1,9 +1,10 @@
-"""Protected seat holding, confirmation, cancellation, and booking history."""
+from datetime import UTC, datetime
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 
 from app.api.v1.deps import Db, current_user
-from app.models.domain import Booking, BookingSeat, SeatHold, User
+from app.models.domain import Booking, BookingSeat, BookingStatus, SeatHold, User
 from app.schemas.contracts import BookingRequest, HoldRequest, HoldResponse
 from app.services.booking import cancel_booking, confirm_hold, create_hold
 
@@ -46,5 +47,44 @@ def cancel(booking_id: str, db: Db, user: User = Depends(current_user)) -> dict:
 
 @router.get("/bookings/me")
 def my_bookings(db: Db, user: User = Depends(current_user)) -> list[dict]:
-    bookings = db.scalars(select(Booking).where(Booking.user_id == user.id).order_by(Booking.created_at.desc())).all()
-    return [{"id": booking.id, "reference": booking.booking_reference, "status": booking.status, "event_id": booking.event_id, "created_at": booking.created_at} for booking in bookings]
+    bookings = db.scalars(
+        select(Booking)
+        .where(Booking.user_id == user.id)
+        .order_by(Booking.created_at.desc())
+    ).all()
+    current_time = datetime.now(UTC)
+    result = []
+    for booking in bookings:
+        event = booking.event
+        seats_info = []
+        tickets_info = []
+        for bs in booking.seats:
+            if bs.released_at is None or booking.status == BookingStatus.CANCELLED:
+                if bs.event_seat and bs.event_seat.venue_seat:
+                    row_lbl = bs.event_seat.venue_seat.row.row_label if bs.event_seat.venue_seat.row else ""
+                    seat_lbl = bs.event_seat.venue_seat.seat_label
+                    seats_info.append(f"{row_lbl}{seat_lbl}")
+                if bs.ticket:
+                    tickets_info.append(bs.ticket.ticket_code)
+
+        can_cancel = (
+            booking.status == BookingStatus.CONFIRMED
+            and (not event or not event.cancellation_deadline or current_time <= event.cancellation_deadline)
+        )
+
+        result.append({
+            "id": booking.id,
+            "reference": booking.booking_reference,
+            "status": booking.status.value if hasattr(booking.status, "value") else str(booking.status),
+            "event_id": booking.event_id,
+            "event_title": event.title if event else "Campus Event",
+            "venue_name": event.venue.name if event and event.venue else "Campus Venue",
+            "start_at": event.start_at if event else None,
+            "end_at": event.end_at if event else None,
+            "created_at": booking.created_at,
+            "cancelled_at": booking.cancelled_at,
+            "seats": seats_info,
+            "tickets": tickets_info,
+            "can_cancel": can_cancel,
+        })
+    return result
