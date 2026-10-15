@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { CalendarDays, MapPin, Ticket, AlertCircle } from 'lucide-react'
+import { CalendarDays, MapPin, Ticket, AlertCircle, QrCode, X } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { bookingApi } from '../../services/api'
 
@@ -21,6 +21,7 @@ function errorMessage(error, fallback) {
 export function MyBookingsView({ user, onSignIn, onBrowse, onNotify }) {
   const [cancellingId, setCancellingId] = useState(null)
   const [confirmModal, setConfirmModal] = useState(null)
+  const [qrModalTicket, setQrModalTicket] = useState(null)
   const queryClient = useQueryClient()
 
   const { data: bookings = [], isLoading, isError, error } = useQuery({
@@ -136,9 +137,25 @@ export function MyBookingsView({ user, onSignIn, onBrowse, onNotify }) {
                   {booking.tickets && booking.tickets.length > 0 && (
                     <div className="booking-tickets-section">
                       <span className="section-label">Digital Ticket Codes:</span>
-                      <div className="ticket-codes">
+                      <div className="ticket-codes" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
                         {booking.tickets.map((code) => (
-                          <span className="ticket-code-badge" key={code}>{code}</span>
+                          <div
+                            key={code}
+                            style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f4f6fa', border: '1px solid #dde2ea', padding: '4px 8px', borderRadius: '6px' }}
+                          >
+                            <span className="ticket-code-badge" style={{ border: 0, padding: 0, background: 'transparent' }}>{code}</span>
+                            {isConfirmed && (
+                              <button
+                                className="icon-button"
+                                style={{ padding: '2px', background: '#e9e7ff', color: '#5b4ce2', borderRadius: '4px' }}
+                                onClick={() => setQrModalTicket({ ticket_code: code, reference: booking.reference, event_title: booking.event_title })}
+                                title="View Ticket QR Code"
+                                aria-label="View Ticket QR Code"
+                              >
+                                <QrCode size={14} />
+                              </button>
+                            )}
+                          </div>
                         ))}
                       </div>
                     </div>
@@ -193,6 +210,37 @@ export function MyBookingsView({ user, onSignIn, onBrowse, onNotify }) {
                 {cancellingId === confirmModal.id ? 'Cancelling…' : 'Yes, cancel booking'}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {qrModalTicket && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Digital Ticket QR">
+          <div className="auth-modal" style={{ textAlign: 'center', maxWidth: '380px' }}>
+            <button className="icon-button auth-close" type="button" onClick={() => setQrModalTicket(null)} aria-label="Close">
+              <X />
+            </button>
+            <div className="eyebrow auth-eyebrow">Digital Ticket</div>
+            <h2>{qrModalTicket.event_title}</h2>
+            <p className="muted" style={{ marginBottom: '16px' }}>
+              Booking: <strong>{qrModalTicket.reference}</strong>
+            </p>
+            <div style={{ background: '#ffffff', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'inline-block', boxShadow: '0 4px 12px rgba(0,0,0,0.06)' }}>
+              <img
+                src={`/api/v1/tickets/${qrModalTicket.ticket_code}/qr`}
+                alt="Ticket QR Code"
+                style={{ width: '200px', height: '200px', display: 'block' }}
+              />
+            </div>
+            <div style={{ marginTop: '14px', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '1rem', letterSpacing: '1px', color: '#5b4ce2' }}>
+              {qrModalTicket.ticket_code}
+            </div>
+            <p className="notice" style={{ marginTop: '12px' }}>
+              Present this QR code at the entrance for instant check-in.
+            </p>
+            <button className="secondary-btn full" style={{ marginTop: '16px' }} onClick={() => setQrModalTicket(null)}>
+              Close
+            </button>
           </div>
         </div>
       )}

@@ -41,3 +41,20 @@ def deliver_email(db: Session, item: EmailOutbox) -> bool:
         item.status, item.retry_count = "FAILED", item.retry_count + 1
         db.commit()
         return False
+
+
+def process_outbox(db: Session, limit: int = 20) -> int:
+    """Deliver up to `limit` pending emails from the transactional outbox."""
+    from sqlalchemy import select
+    items = db.scalars(
+        select(EmailOutbox)
+        .where(EmailOutbox.status == "PENDING")
+        .order_by(EmailOutbox.created_at.asc())
+        .limit(limit)
+    ).all()
+    count = 0
+    for item in items:
+        deliver_email(db, item)
+        count += 1
+    return count
+

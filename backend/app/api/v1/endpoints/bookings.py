@@ -1,10 +1,12 @@
 from datetime import UTC, datetime
+import io
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
+import qrcode
 from sqlalchemy import select
 
 from app.api.v1.deps import Db, current_user
-from app.models.domain import Booking, BookingSeat, BookingStatus, SeatHold, User
+from app.models.domain import Booking, BookingSeat, BookingStatus, SeatHold, Ticket, User
 from app.schemas.contracts import BookingRequest, HoldRequest, HoldResponse
 from app.services.booking import cancel_booking, confirm_hold, create_hold
 
@@ -88,3 +90,17 @@ def my_bookings(db: Db, user: User = Depends(current_user)) -> list[dict]:
             "can_cancel": can_cancel,
         })
     return result
+
+
+@router.get("/tickets/{ticket_code}/qr")
+def get_ticket_qr(ticket_code: str, db: Db) -> Response:
+    """Generate dynamic QR code PNG for a ticket."""
+    ticket = db.scalar(select(Ticket).where(Ticket.ticket_code == ticket_code.strip()))
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found.")
+
+    img = qrcode.make(ticket.ticket_code)
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return Response(content=buf.getvalue(), media_type="image/png")
+

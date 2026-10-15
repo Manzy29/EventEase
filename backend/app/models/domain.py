@@ -189,6 +189,7 @@ class Ticket(Base):
     booking_seat_id: Mapped[str] = mapped_column(ForeignKey("booking_seats.id", ondelete="CASCADE"), unique=True)
     ticket_code: Mapped[str] = mapped_column(String(48), unique=True, index=True)
     issued_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    checked_in_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20), default="VALID")
     booking_seat: Mapped[BookingSeat] = relationship(back_populates="ticket")
 

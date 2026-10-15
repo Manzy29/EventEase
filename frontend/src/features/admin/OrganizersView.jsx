@@ -183,11 +183,34 @@ function CreateEventModal({ onClose, onCreated, onNotify }) {
   )
 }
 
-function AttendeesModal({ event, onClose }) {
+function AttendeesModal({ event, onClose, onNotify }) {
+  const [scanCode, setScanCode] = useState('')
+  const [checkingIn, setCheckingIn] = useState(false)
+  const [scanMessage, setScanMessage] = useState(null)
+  const queryClient = useQueryClient()
+
   const { data: attendees = [], isLoading, isError, error } = useQuery({
     queryKey: ['attendees', event.id],
     queryFn: () => organizerApi.attendees(event.id),
   })
+
+  const handleCheckIn = async (codeToUse) => {
+    const code = (codeToUse || scanCode).trim()
+    if (!code) return
+    setCheckingIn(true)
+    setScanMessage(null)
+    try {
+      const res = await organizerApi.checkInTicket(code)
+      setScanMessage({ type: 'success', text: res.message })
+      setScanCode('')
+      queryClient.invalidateQueries({ queryKey: ['attendees', event.id] })
+      if (onNotify) onNotify(res.message)
+    } catch (err) {
+      setScanMessage({ type: 'error', text: errorMessage(err, 'Unable to check in ticket.') })
+    } finally {
+      setCheckingIn(false)
+    }
+  }
 
   return (
     <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`Attendees for ${event.title}`}>
@@ -203,6 +226,32 @@ function AttendeesModal({ event, onClose }) {
         </div>
 
         <div className="attendees-body">
+          {/* Quick Check-In Bar */}
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', background: '#f8f9fc', padding: '12px 16px', borderRadius: '8px', border: '1px solid #e2e8f0', alignItems: 'center' }}>
+            <Ticket size={18} color="#5b4ce2" />
+            <input
+              value={scanCode}
+              onChange={(e) => setScanCode(e.target.value)}
+              placeholder="Scan or enter ticket code (e.g. TIX-...)"
+              style={{ flex: 1, padding: '8px 12px', border: '1px solid #cbd5e1', borderRadius: '6px', font: 'inherit', fontSize: '0.9rem' }}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleCheckIn() }}
+            />
+            <button
+              className="primary"
+              onClick={() => handleCheckIn()}
+              disabled={checkingIn || !scanCode.trim()}
+              style={{ whiteSpace: 'nowrap' }}
+            >
+              {checkingIn ? 'Checking…' : 'Check In'}
+            </button>
+          </div>
+
+          {scanMessage && (
+            <div className={`form-message ${scanMessage.type === 'success' ? 'form-message-success' : ''}`} style={{ marginBottom: '16px' }}>
+              {scanMessage.text}
+            </div>
+          )}
+
           {isLoading ? (
             <p className="muted loading">Loading attendee roster…</p>
           ) : isError ? (
@@ -248,9 +297,21 @@ function AttendeesModal({ event, onClose }) {
                         </div>
                       </td>
                       <td>
-                        <div className="ticket-codes-inline">
+                        <div className="ticket-codes-inline" style={{ alignItems: 'center' }}>
                           {item.tickets.map((t) => (
-                            <code className="ticket-code-small" key={t}>{t}</code>
+                            <div key={t} style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                              <code className="ticket-code-small">{t}</code>
+                              {item.status === 'CONFIRMED' && (
+                                <button
+                                  className="text-btn"
+                                  style={{ fontSize: '0.72rem', padding: '2px 6px', color: '#16794c', background: '#e6f9f0', borderRadius: '4px', border: '1px solid #b7f0d0' }}
+                                  onClick={() => handleCheckIn(t)}
+                                  title="Check in attendee at door"
+                                >
+                                  Admit
+                                </button>
+                              )}
+                            </div>
                           ))}
                         </div>
                       </td>
@@ -273,6 +334,7 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedEventForAttendees, setSelectedEventForAttendees] = useState(null)
   const [claimingRole, setClaimingRole] = useState(false)
+  const [seeding, setSeeding] = useState(false)
   const queryClient = useQueryClient()
 
   const isOrganizer = user && (user.role === 'ORGANIZER' || user.role === 'ADMIN')
@@ -375,6 +437,23 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
   const totalBookings = events.reduce((acc, ev) => acc + (ev.total_bookings || 0), 0)
   const totalBookedSeats = events.reduce((acc, ev) => acc + (ev.booked_seats || 0), 0)
 
+  const handleSeedDemoData = async (reset = false) => {
+    if (reset && !window.confirm('Reset all demo events, venues, and student bookings back to default demo state?')) {
+      return
+    }
+    setSeeding(true)
+    try {
+      const res = await organizerApi.seedDemoData(reset)
+      await queryClient.invalidateQueries({ queryKey: ['organizer-events'] })
+      await queryClient.invalidateQueries({ queryKey: ['events'] })
+      onNotify(res.message || 'Demonstration data loaded successfully!')
+    } catch (err) {
+      onNotify(errorMessage(err, 'Failed to seed demo data.'))
+    } finally {
+      setSeeding(false)
+    }
+  }
+
   return (
     <div className="organizer-page">
       <div className="section-top">
@@ -387,10 +466,21 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
             Welcome back, {user.full_name}. Oversee your scheduled events and seating allocations.
           </p>
         </div>
-        <button className="primary" onClick={() => setShowCreateModal(true)}>
-          <Plus size={16} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '6px' }} />
-          Create New Event
-        </button>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            className="secondary-btn"
+            onClick={() => handleSeedDemoData(true)}
+            disabled={seeding}
+            title="Wipe and restore 5 events across 2 venues with sample bookings"
+          >
+            <Sparkles size={15} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '6px' }} />
+            {seeding ? 'Seeding…' : 'Re-Seed Demo Data'}
+          </button>
+          <button className="primary" onClick={() => setShowCreateModal(true)}>
+            <Plus size={16} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '6px' }} />
+            Create New Event
+          </button>
+        </div>
       </div>
 
       <div className="stats-grid">
@@ -428,10 +518,16 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
         <div className="empty">
           <CalendarDays size={36} style={{ color: '#8d99ae', margin: '0 auto 12px' }} />
           <h3>No events published yet</h3>
-          <p className="muted">You haven't created any events. Click below to publish your first campus event.</p>
-          <button className="primary" style={{ marginTop: '16px' }} onClick={() => setShowCreateModal(true)}>
-            Create your first event
-          </button>
+          <p className="muted">You haven't created any events. Click below to publish your first campus event or populate sample demo events.</p>
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '16px' }}>
+            <button className="secondary-btn" onClick={() => handleSeedDemoData(false)} disabled={seeding}>
+              <Sparkles size={15} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '6px' }} />
+              {seeding ? 'Populating…' : 'Seed Sample Events & Venues'}
+            </button>
+            <button className="primary" onClick={() => setShowCreateModal(true)}>
+              Create your first event
+            </button>
+          </div>
         </div>
       ) : (
         <div className="organizer-events-list">
@@ -500,6 +596,7 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
         <AttendeesModal
           event={selectedEventForAttendees}
           onClose={() => setSelectedEventForAttendees(null)}
+          onNotify={onNotify}
         />
       )}
     </div>

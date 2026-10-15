@@ -7,6 +7,7 @@ export const api = axios.create({ baseURL: import.meta.env.VITE_API_URL || '/api
 
 export const eventApi = {
   list: (params) => api.get('/events', { params }).then(({ data }) => data),
+  get: (eventId) => api.get(`/events/${eventId}`).then(({ data }) => data),
   seats: (eventId) => api.get(`/events/${eventId}/seats`).then(({ data }) => data),
   hold: (eventId, event_seat_ids) => api.post(`/events/${eventId}/holds`, { event_seat_ids }).then(({ data }) => data),
   book: (eventId, hold_id) => api.post(`/events/${eventId}/bookings`, { hold_id }).then(({ data }) => data),
@@ -16,6 +17,7 @@ export const authApi = {
   me: () => api.get('/auth/me').then(({ data }) => data),
   login: (email, password) => api.post('/auth/login', { email, password }).then(({ data }) => data),
   register: (full_name, email, password) => api.post('/auth/register', { full_name, email, password }).then(({ data }) => data),
+  verifyEmail: (email, code) => api.post('/auth/verify-email', { email, code }).then(({ data }) => data),
   logout: () => api.post('/auth/logout'),
 }
 
@@ -28,8 +30,16 @@ export const organizerApi = {
   events: () => api.get('/organizer/events').then(({ data }) => data),
   attendees: (eventId) => api.get(`/organizer/events/${eventId}/attendees`).then(({ data }) => data),
   createEvent: (data) => api.post('/organizer/events', data).then(({ data }) => data),
+  updateEvent: (eventId, data) => api.put(`/organizer/events/${eventId}`, data).then(({ data }) => data),
+  cancelEvent: (eventId) => api.post(`/organizer/events/${eventId}/cancel`).then(({ data }) => data),
+  checkInTicket: (ticketCode) => api.post(`/organizer/tickets/${ticketCode}/check-in`).then(({ data }) => data),
   venues: () => api.get('/organizer/venues').then(({ data }) => data),
   categories: () => api.get('/organizer/categories').then(({ data }) => data),
   claimRole: () => api.post('/organizer/claim-role').then(({ data }) => data),
+  seedDemoData: (reset = false) => api.post('/system/seed-data', null, { params: { reset } }).then(({ data }) => data),
+}
+
+export const systemApi = {
+  seed: (reset = false) => api.post('/system/seed-data', null, { params: { reset } }).then(({ data }) => data),
 }
 
