@@ -23,3 +23,10 @@ def admin_user(user: Annotated[User, Depends(current_user)]) -> User:
     if user.role != Role.ADMIN:
         raise HTTPException(status_code=403, detail="Administrator permission required.")
     return user
+
+
+def organizer_user(user: Annotated[User, Depends(current_user)]) -> User:
+    if user.role not in (Role.ORGANIZER, Role.ADMIN):
+        raise HTTPException(status_code=403, detail="Organizer permission required.")
+    return user
+

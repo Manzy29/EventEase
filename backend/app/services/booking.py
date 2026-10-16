@@ -22,6 +22,14 @@ def now() -> datetime:
     return datetime.now(UTC)
 
 
+def ensure_utc(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
 def expire_holds(db: Session, event_id: str | None = None) -> None:
     query = update(SeatHold).where(SeatHold.status == HoldStatus.ACTIVE, SeatHold.expires_at <= now())
     if event_id:
@@ -42,6 +50,13 @@ def create_hold(db: Session, user: User, event_id: str, seat_ids: list[str]) -> 
             raise HTTPException(status_code=404, detail="This event is not open for booking.")
         if not user.is_email_verified or not user.is_active:
             raise HTTPException(status_code=403, detail="A verified active account is required to reserve seats.")
+        current_time = now()
+        reg_opens = ensure_utc(event.registration_opens_at)
+        reg_closes = ensure_utc(event.registration_closes_at)
+        if reg_opens and current_time < reg_opens:
+            raise HTTPException(status_code=400, detail="Registration for this event has not opened yet.")
+        if reg_closes and current_time > reg_closes:
+            raise HTTPException(status_code=400, detail="Registration for this event has closed.")
         expire_holds(db, event_id)
         seats = db.scalars(
             select(EventSeat).where(EventSeat.id.in_(unique_ids), EventSeat.event_id == event_id).order_by(EventSeat.id).with_for_update()
@@ -72,7 +87,8 @@ def confirm_hold(db: Session, user: User, event_id: str, hold_id: str) -> Bookin
         hold = db.scalar(
             select(SeatHold).options(joinedload(SeatHold.items)).where(SeatHold.id == hold_id).with_for_update()
         )
-        if not hold or hold.user_id != user.id or hold.event_id != event_id or hold.status != HoldStatus.ACTIVE or hold.expires_at <= now():
+        expires_at = ensure_utc(hold.expires_at) if hold else None
+        if not hold or hold.user_id != user.id or hold.event_id != event_id or hold.status != HoldStatus.ACTIVE or (expires_at and expires_at <= now()):
             raise HTTPException(status_code=409, detail="This reservation hold is unavailable or expired.")
         seat_ids = sorted(item.event_seat_id for item in hold.items)
         db.scalars(select(EventSeat).where(EventSeat.id.in_(seat_ids)).order_by(EventSeat.id).with_for_update()).all()
@@ -103,7 +119,8 @@ def cancel_booking(db: Session, user: User, booking_id: str) -> Booking:
         if booking.status != BookingStatus.CONFIRMED:
             raise HTTPException(status_code=409, detail="Only confirmed bookings can be cancelled.")
         event = db.get(Event, booking.event_id)
-        if event and event.cancellation_deadline and now() > event.cancellation_deadline:
+        deadline = ensure_utc(event.cancellation_deadline) if event else None
+        if deadline and now() > deadline:
             raise HTTPException(status_code=409, detail="The cancellation deadline has passed.")
         booking.status, booking.cancelled_at = BookingStatus.CANCELLED, now()
         db.execute(update(BookingSeat).where(BookingSeat.booking_id == booking.id, BookingSeat.released_at.is_(None)).values(released_at=now()))
