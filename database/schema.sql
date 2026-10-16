@@ -156,3 +156,127 @@ CREATE TABLE email_outbox (
   created_at timestamptz NOT NULL DEFAULT now(),
   sent_at timestamptz
 );
+-- ========================================================
+-- 1. Table #9: Booking OTP Verifications
+-- ========================================================
+CREATE TABLE IF NOT EXISTS booking_otp_verifications (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  booking_id uuid NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+  otp_hash varchar(128) NOT NULL,
+  expires_at timestamptz NOT NULL,
+  consumed_at timestamptz,
+  attempt_count integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_booking_otp_booking_id ON booking_otp_verifications(booking_id);
+
+-- ========================================================
+-- 2. Table #10: Cancellations Table (Page 6 of PDF)
+-- ========================================================
+CREATE TABLE IF NOT EXISTS cancellations (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  booking_id uuid NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+  user_id uuid NOT NULL REFERENCES users(id),
+  reason varchar(255) NOT NULL,
+  cancelled_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_cancellations_booking_id ON cancellations(booking_id);
+
+-- ========================================================
+-- 3. Views (Required by Rubric Page 7)
+-- ========================================================
+-- View 1: AvailableSeatsView
+CREATE OR REPLACE VIEW AvailableSeatsView AS
+SELECT 
+    e.id AS event_id,
+    e.title AS event_title,
+    count(es.id) FILTER (WHERE NOT es.is_blocked AND bs.id IS NULL AND (sh.id IS NULL OR sh.status != 'ACTIVE' OR sh.expires_at <= now())) AS available_seats
+FROM events e
+JOIN event_seats es ON es.event_id = e.id
+LEFT JOIN booking_seats bs ON bs.event_seat_id = es.id AND bs.released_at IS NULL
+LEFT JOIN seat_hold_items shi ON shi.event_seat_id = es.id
+LEFT JOIN seat_holds sh ON sh.id = shi.seat_hold_id
+GROUP BY e.id, e.title;
+
+-- View 2: EventBookingSummary
+CREATE OR REPLACE VIEW EventBookingSummary AS
+SELECT 
+    e.id AS event_id,
+    e.title,
+    count(DISTINCT b.id) FILTER (WHERE b.status = 'CONFIRMED') AS confirmed_bookings,
+    count(DISTINCT bs.id) FILTER (WHERE bs.released_at IS NULL) AS total_seats_booked,
+    count(DISTINCT c.id) AS total_cancellations
+FROM events e
+LEFT JOIN bookings b ON b.event_id = e.id
+LEFT JOIN booking_seats bs ON bs.booking_id = b.id
+LEFT JOIN cancellations c ON c.booking_id = b.id
+GROUP BY e.id, e.title;
+
+-- ========================================================
+-- 4. PostgreSQL Triggers (Required by Rubric Page 7)
+-- ========================================================
+-- Trigger 1: Audit Booking Status Changes
+CREATE TABLE IF NOT EXISTS booking_audit_log (
+    audit_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    booking_id uuid NOT NULL,
+    old_status varchar(32),
+    new_status varchar(32),
+    changed_at timestamptz DEFAULT now()
+);
+
+CREATE OR REPLACE FUNCTION audit_booking_status_change()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF OLD.status IS DISTINCT FROM NEW.status THEN
+        INSERT INTO booking_audit_log (booking_id, old_status, new_status, changed_at)
+        VALUES (NEW.id, OLD.status, NEW.status, now());
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_audit_booking_status ON bookings;
+CREATE TRIGGER trg_audit_booking_status
+AFTER UPDATE OF status ON bookings
+FOR EACH ROW
+EXECUTE FUNCTION audit_booking_status_change();
+
+-- Trigger 2: Automatically record Cancellation when booking status becomes 'CANCELLED'
+CREATE OR REPLACE FUNCTION trg_record_cancellation_func()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.status = 'CANCELLED' AND OLD.status != 'CANCELLED' THEN
+        INSERT INTO cancellations (booking_id, user_id, reason, cancelled_at)
+        VALUES (NEW.id, NEW.user_id, 'Automated trigger cancellation', now())
+        ON CONFLICT DO NOTHING;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_auto_record_cancellation ON bookings;
+CREATE TRIGGER trg_auto_record_cancellation
+AFTER UPDATE OF status ON bookings
+FOR EACH ROW
+EXECUTE FUNCTION trg_record_cancellation_func();
+
+-- ========================================================
+-- 5. Stored Procedures (Required by Rubric Page 7)
+-- ========================================================
+-- Procedure: CancelBooking
+CREATE OR REPLACE PROCEDURE CancelBooking(p_booking_id uuid, p_user_id uuid, p_reason varchar)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    UPDATE bookings
+    SET status = 'CANCELLED', cancelled_at = now()
+    WHERE id = p_booking_id AND user_id = p_user_id AND status = 'CONFIRMED';
+
+    UPDATE booking_seats
+    SET released_at = now()
+    WHERE booking_id = p_booking_id AND released_at IS NULL;
+
+    INSERT INTO cancellations (booking_id, user_id, reason, cancelled_at)
+    VALUES (p_booking_id, p_user_id, p_reason, now());
+END;
+$$;

@@ -108,25 +108,47 @@ def seed_database(db: Session, reset: bool = False, admin_password: str = "Campu
         else:
             categories[name] = existing
 
-    # 3. Venue 1: IS Seminar Hall (24 seats: 3 rows x 8 seats)
+   # 3. Venue 1: IS Seminar Hall (Actual 7-Row Curved Amphitheatre Layout)
     venue1 = db.query(Venue).filter_by(name="IS Seminar Hall (sample configuration)").first()
     v1_seats: list[VenueSeat] = []
+    
+    # 7 Rows: [Row A: 7, Row B: 9, Row C: 11, Row D: 13, Row E: 15, Row F: 17, Row G: 17] per side
+    row_configs = [
+        ("A", 7),
+        ("B", 9),
+        ("C", 11),
+        ("D", 13),
+        ("E", 15),
+        ("F", 17),
+        ("G", 17),
+    ]
+
     if not venue1:
         venue1 = Venue(
             name="IS Seminar Hall (sample configuration)",
             location="Information Science Block, 3rd Floor",
-            description="Acoustically treated seminar hall for technical talks and workshops.",
+            description="Acoustically treated seminar hall with dual projection screens and amphitheatric seating.",
         )
         db.add(venue1)
         db.flush()
-        for r_idx, r_label in enumerate(["A", "B", "C"]):
-            row = VenueRow(venue_id=venue1.id, row_label=r_label, display_order=r_idx)
+
+        for r_idx, (r_label, half_count) in enumerate(row_configs):
+            row = VenueRow(venue_id=venue1.id, row_label=r_label, display_order=r_idx + 1)
             db.add(row)
             db.flush()
-            for s_num in range(1, 9):
-                seat = VenueSeat(venue_row_id=row.id, seat_label=str(s_num), position=s_num)
+            pos = 1
+            # Left Wing (L1..Ln)
+            for s in range(1, half_count + 1):
+                seat = VenueSeat(venue_row_id=row.id, seat_label=f"L{s}", position=pos)
                 db.add(seat)
                 v1_seats.append(seat)
+                pos += 1
+            # Right Wing (R1..Rn)
+            for s in range(1, half_count + 1):
+                seat = VenueSeat(venue_row_id=row.id, seat_label=f"R{s}", position=pos)
+                db.add(seat)
+                v1_seats.append(seat)
+                pos += 1
         db.flush()
     else:
         v1_seats = (

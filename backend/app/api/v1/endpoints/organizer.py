@@ -26,6 +26,10 @@ class CreateEventPayload(BaseModel):
     cancellation_deadline: datetime | None = None
     poster_url: str | None = None
 
+class BlockSeatsPayload(BaseModel):
+    event_seat_ids: list[str]
+    is_blocked: bool = True
+
 
 @router.get("/venues")
 def list_venues(db: Db, user: User = Depends(organizer_user)) -> list[dict]:
@@ -208,6 +212,56 @@ def cancel_event(event_id: str, db: Db, user: User = Depends(organizer_user)) ->
     db.commit()
     return {"message": f"Event '{event.title}' and all associated bookings have been cancelled."}
 
+@router.post("/events/{event_id}/block-seats")
+def block_event_seats(
+    event_id: str,
+    payload: BlockSeatsPayload,
+    db: Db,
+    user: User = Depends(organizer_user),
+) -> dict:
+    """Allows organizers to reserve/block seats (e.g., for VIPs, guests, crew) before or during an event."""
+    event = db.get(Event, event_id)
+    if not event:
+        raise HTTPException(status_code=404, detail="Event not found.")
+
+    if user.role != Role.ADMIN and event.organizer_id != user.id:
+        raise HTTPException(status_code=403, detail="You can only manage seats for your own events.")
+
+    # Fetch candidate event seats
+    seats = db.scalars(
+        select(EventSeat).where(
+            EventSeat.id.in_(payload.event_seat_ids),
+            EventSeat.event_id == event_id,
+        )
+    ).all()
+
+    if len(seats) != len(payload.event_seat_ids):
+        raise HTTPException(status_code=400, detail="One or more selected seats are invalid.")
+
+    # Prevent blocking seats that students have already confirmed
+    if payload.is_blocked:
+        already_booked = db.scalar(
+            select(BookingSeat.id)
+            .where(
+                BookingSeat.event_seat_id.in_(payload.event_seat_ids),
+                BookingSeat.released_at.is_(None),
+            )
+            .limit(1)
+        )
+        if already_booked:
+            raise HTTPException(status_code=409, detail="Cannot block seats that are already booked by students.")
+
+    # Update is_blocked status
+    for s in seats:
+        s.is_blocked = payload.is_blocked
+
+    db.commit()
+    action = "blocked" if payload.is_blocked else "unblocked"
+    return {
+        "status": "success",
+        "message": f"Successfully {action} {len(seats)} seat(s).",
+        "count": len(seats),
+    }
 
 @router.post("/tickets/{ticket_code}/check-in")
 def check_in_ticket(ticket_code: str, db: Db, user: User = Depends(organizer_user)) -> dict:

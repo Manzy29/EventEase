@@ -27,15 +27,38 @@ def serialize(user: User) -> UserResponse:
 @router.post("/register", status_code=status.HTTP_201_CREATED)
 def register(payload: RegisterRequest, db: Db) -> dict[str, str]:
     email = str(payload.email).lower().strip()
-    if db.scalar(select(User.id).where(User.email == email)):
-        raise HTTPException(status_code=409, detail="Unable to create this account.")
+    existing_user = db.scalar(select(User).where(User.email == email))
+
+    if existing_user:
+        # If already verified, direct them to login
+        if existing_user.is_email_verified:
+            raise HTTPException(status_code=409, detail="An account with this email already exists. Please log in.")
+        # If unverified, refresh details and resend a new OTP
+        existing_user.full_name = payload.full_name.strip()
+        existing_user.password_hash = hash_password(payload.password)
+        user_id = existing_user.id
+    else:
+        user = User(full_name=payload.full_name.strip(), email=email, password_hash=hash_password(payload.password))
+        db.add(user)
+        db.flush()
+        user_id = user.id
+
     code = f"{secrets.randbelow(1_000_000):06d}"
-    user = User(full_name=payload.full_name.strip(), email=email, password_hash=hash_password(payload.password))
-    db.add(user); db.flush()
-    db.add(EmailVerificationToken(user_id=user.id, token_hash=token_hash(code), expires_at=datetime.now(UTC) + timedelta(minutes=10)))
-    queue_email(db, email, "EMAIL_VERIFICATION", {"subject": "Verify your CampusTix account", "html": f"<p>Your verification code is <strong>{code}</strong>.</p>"})
+    db.add(
+        EmailVerificationToken(
+            user_id=user_id,
+            token_hash=token_hash(code),
+            expires_at=datetime.now(UTC) + timedelta(minutes=10),
+        )
+    )
+    queue_email(
+        db,
+        email,
+        "EMAIL_VERIFICATION",
+        {"subject": "Verify your CampusTix account", "html": f"<p>Your verification code is <strong>{code}</strong>.</p>"},
+    )
     db.commit()
-    return {"message": "Check your email for a verification code. Development mode may queue delivery only."}
+    return {"message": "Check your email for your verification code."}
 
 
 @router.post("/verify-email")

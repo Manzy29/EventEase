@@ -11,7 +11,10 @@ export const eventApi = {
   seats: (eventId) => api.get(`/events/${eventId}/seats`).then(({ data }) => data),
   hold: (eventId, event_seat_ids) => api.post(`/events/${eventId}/holds`, { event_seat_ids }).then(({ data }) => data),
   book: (eventId, hold_id) => api.post(`/events/${eventId}/bookings`, { hold_id }).then(({ data }) => data),
+   getPending: (eventId) => api.get(`/events/${eventId}/pending-booking`).then(({ data }) => data),
+  verifyBookingOtp: (bookingId, holdId, otp) => api.post(`/bookings/${bookingId}/verify-otp?hold_id=${holdId}`, { otp }).then(({ data }) => data),
 }
+
 
 export const authApi = {
   me: () => api.get('/auth/me').then(({ data }) => data),
@@ -37,6 +40,11 @@ export const organizerApi = {
   categories: () => api.get('/organizer/categories').then(({ data }) => data),
   claimRole: () => api.post('/organizer/claim-role').then(({ data }) => data),
   seedDemoData: (reset = false) => api.post('/system/seed-data', null, { params: { reset } }).then(({ data }) => data),
+   blockSeats: (eventId, eventSeatIds, isBlocked = true) =>
+    api.post(`/organizer/events/${eventId}/block-seats`, {
+      event_seat_ids: eventSeatIds,
+      is_blocked: isBlocked,
+    }).then(({ data }) => data),
 }
 
 export const systemApi = {

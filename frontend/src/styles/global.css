@@ -122,4 +122,172 @@ button { cursor: pointer; }
 
 @media(max-width:800px){.nav-links{display:none}.mobile-menu-btn{display:inline-flex;align-items:center;justify-content:center}.hero{grid-template-columns:1fr}.hero-card{display:none}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.booking-layout{grid-template-columns:1fr}.booking-summary{border-left:0;border-top:1px solid #e7eaf0}.search{display:none}.bookings-grid{grid-template-columns:1fr}.portal-features{grid-template-columns:1fr}.stats-grid{grid-template-columns:1fr}.organizer-event-card{grid-template-columns:1fr}.form-row{grid-template-columns:1fr}} @media(max-width:520px){.nav{padding:0 18px}.nav-actions .text-btn{display:none}.hero,.content{padding-left:20px;padding-right:20px}.grid{grid-template-columns:1fr}.section-top{align-items:start}.seat{width:25px;height:25px}.seat-line{gap:5px}.modal{max-height:94vh;overflow:auto}}
 
+/* ========================================================
+   IS Seminar Hall Viewing Geometry (Optimized Full-Width Fit)
+   ======================================================== */
 
+/* 1. Expand the modal dialog to comfortably use the screen */
+.seminar-modal {
+  max-width: 1420px;
+  width: 96vw;
+  max-height: 94vh;
+}
+
+.seminar-layout {
+  grid-template-columns: 1fr 280px;
+  height: 100%;
+}
+
+.seminar-panel {
+  overflow-x: auto;
+  overflow-y: auto;
+  padding: 20px 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* 2. Dual Angled Projection Screens */
+.dual-screen-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  margin-bottom: 22px;
+  width: 100%;
+}
+
+.screens-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: 100%;
+  max-width: 580px;
+}
+
+.screen-box {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  background: #ffffff;
+  border: 1.5px solid #dde2ea;
+  border-radius: 8px;
+  color: #172233;
+  font-weight: 700;
+  font-size: 0.74rem;
+  letter-spacing: 0.08em;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.screen-left {
+  transform: perspective(300px) rotateY(10deg);
+}
+
+.screen-right {
+  transform: perspective(300px) rotateY(-10deg);
+}
+
+.podium-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #7c8495;
+  background: #f0f2f7;
+  padding: 4px 8px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+
+.stage-curve-bar {
+  width: 60%;
+  height: 7px;
+  margin-top: 8px;
+  border-radius: 50% 50% 2px 2px;
+  background: #cbd0dc;
+}
+
+.stage-text {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: #7c8495;
+  margin-top: 4px;
+}
+
+/* 3. Seminar Hall Grid - width: max-content stops left-side clipping */
+.seminar-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0 auto;
+  width: max-content;
+  padding: 0 10px;
+}
+
+.seminar-row {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+/* 4. Left & Right Wings: Flare out symmetrically from the center aisle */
+.seat-wing {
+  display: flex;
+  gap: 3px;
+  flex-shrink: 0;
+}
+
+.seat-wing.left-wing {
+  justify-content: flex-end; /* Aligns to center aisle, fans out left */
+  width: clamp(280px, 34vw, 470px);
+}
+
+.seat-wing.right-wing {
+  justify-content: flex-start; /* Aligns to center aisle, fans out right */
+  width: clamp(280px, 34vw, 470px);
+}
+
+/* 5. Seat button proportions (fits all 17 + 17 seats comfortably) */
+.seat {
+  width: clamp(21px, 1.7vw, 25px);
+  height: clamp(21px, 1.7vw, 25px);
+  font-size: clamp(0.55rem, 0.65vw, 0.64rem);
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  flex-shrink: 0;
+  transition: transform 0.1s ease;
+}
+
+/* 6. Center Aisle & Stairs */
+.center-aisle {
+  width: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.aisle-step {
+  width: 18px;
+  height: 2px;
+  background: #cbd0dc;
+  border-radius: 1px;
+}
+
+.row-name {
+  width: 16px;
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #788297;
+  flex-shrink: 0;
+}

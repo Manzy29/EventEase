@@ -41,6 +41,8 @@ class UserResponse(BaseModel):
     role: str
     is_email_verified: bool
 
+class VerifyBookingOTPRequest(BaseModel):
+    otp: str = Field(pattern=r"^\d{6}$")
 
 class EventListItem(BaseModel):
     id: str

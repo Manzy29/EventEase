@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import {
   CalendarDays,
   MapPin,
@@ -9,9 +9,10 @@ import {
   X,
   Layers,
   Sparkles,
+  Ban,
 } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { organizerApi } from '../../services/api'
+import { organizerApi, eventApi } from '../../services/api'
 
 function formatDate(value) {
   if (!value) return ''
@@ -226,7 +227,6 @@ function AttendeesModal({ event, onClose, onNotify }) {
         </div>
 
         <div className="attendees-body">
-          {/* Quick Check-In Bar */}
           <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', background: '#f8f9fc', padding: '12px 16px', borderRadius: '8px', border: '1px solid #e2e8f0', alignItems: 'center' }}>
             <Ticket size={18} color="#5b4ce2" />
             <input
@@ -330,9 +330,176 @@ function AttendeesModal({ event, onClose, onNotify }) {
   )
 }
 
+function BlockSeatsModal({ event, onClose, onNotify }) {
+  const [selectedSeatIds, setSelectedSeatIds] = useState([])
+  const [submitting, setSubmitting] = useState(false)
+  const queryClient = useQueryClient()
+
+  const { data: seats = [], isLoading } = useQuery({
+    queryKey: ['seats', event.id],
+    queryFn: () => eventApi.seats(event.id),
+  })
+
+  const rows = useMemo(() => {
+    const map = seats.reduce((acc, seat) => {
+      (acc[seat.row] ||= []).push(seat)
+      return acc
+    }, {})
+    Object.keys(map).forEach((r) => {
+      map[r].sort((a, b) => a.position - b.position)
+    })
+    return Object.values(map)
+  }, [seats])
+
+  const toggleSeat = (seat) => {
+    if (seat.status === 'BOOKED') return
+    setSelectedSeatIds((prev) =>
+      prev.includes(seat.id) ? prev.filter((id) => id !== seat.id) : [...prev, seat.id]
+    )
+  }
+
+  const handleUpdateBlocking = async (isBlocked) => {
+    if (!selectedSeatIds.length) return
+    setSubmitting(true)
+    try {
+      const res = await organizerApi.blockSeats(event.id, selectedSeatIds, isBlocked)
+      onNotify(res.message)
+      setSelectedSeatIds([])
+      queryClient.invalidateQueries({ queryKey: ['seats', event.id] })
+      queryClient.invalidateQueries({ queryKey: ['organizer-events'] })
+      queryClient.invalidateQueries({ queryKey: ['events'] })
+    } catch (err) {
+      alert(errorMessage(err, 'Failed to update seat status.'))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label={`Block seats for ${event.title}`}>
+      <div className="modal seminar-modal">
+        <div className="modal-head">
+          <div>
+            <h2>Block / Reserve Seats (VIP & Crew)</h2>
+            <div className="muted">{event.title} · {event.venue}</div>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Close">
+            <X />
+          </button>
+        </div>
+
+        <div className="booking-layout seminar-layout">
+          <div className="seat-panel seminar-panel">
+            <p className="muted" style={{ textAlign: 'center', marginBottom: '14px' }}>
+              Click any available or blocked seats to select them, then choose <strong>Block</strong> or <strong>Unblock</strong>.
+            </p>
+
+            {isLoading ? (
+              <p className="muted loading">Loading seat grid…</p>
+            ) : (
+              <div className="seminar-grid">
+                {rows.map((rowSeats) => {
+                  const rowLabel = rowSeats[0].row
+                  const half = Math.ceil(rowSeats.length / 2)
+                  const leftSeats = rowSeats.slice(0, half)
+                  const rightSeats = rowSeats.slice(half)
+
+                  return (
+                    <div className="seminar-row" key={rowLabel}>
+                      <span className="row-name">{rowLabel}</span>
+                      <div className="seat-wing left-wing">
+                        {leftSeats.map((seat) => {
+                          const isSelected = selectedSeatIds.includes(seat.id)
+                          return (
+                            <button
+                              key={seat.id}
+                              onClick={() => toggleSeat(seat)}
+                              className={`seat ${seat.status.toLowerCase()} ${isSelected ? 'selected' : ''}`}
+                              title={`${seat.label}: ${seat.status}`}
+                              disabled={seat.status === 'BOOKED'}
+                            >
+                              {seat.label.replace(/^[A-Z]-?/, '')}
+                            </button>
+                          )
+                        })}
+                      </div>
+
+                      <div className="center-aisle">
+                        <span className="aisle-step" />
+                        <span className="aisle-step" />
+                      </div>
+
+                      <div className="seat-wing right-wing">
+                        {rightSeats.map((seat) => {
+                          const isSelected = selectedSeatIds.includes(seat.id)
+                          return (
+                            <button
+                              key={seat.id}
+                              onClick={() => toggleSeat(seat)}
+                              className={`seat ${seat.status.toLowerCase()} ${isSelected ? 'selected' : ''}`}
+                              title={`${seat.label}: ${seat.status}`}
+                              disabled={seat.status === 'BOOKED'}
+                            >
+                              {seat.label.replace(/^[A-Z]-?/, '')}
+                            </button>
+                          )
+                        })}
+                      </div>
+                      <span className="row-name">{rowLabel}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            <div className="legend" style={{ marginTop: '20px' }}>
+              <span><i className="dot" style={{ background: '#e7eefc' }} /> Available</span>
+              <span><i className="dot" style={{ background: 'repeating-linear-gradient(135deg,#eee 0 3px,#d7dbe3 3px 6px)' }} /> Blocked (Reserved)</span>
+              <span><i className="dot" style={{ background: '#5b4ce2' }} /> Selected to Edit</span>
+              <span><i className="dot" style={{ background: '#d9dde4' }} /> Booked (Locked)</span>
+            </div>
+          </div>
+
+          <aside className="booking-summary">
+            <h3>Seat Management</h3>
+            <p className="muted">Blocked seats cannot be viewed or selected by students.</p>
+
+            <div style={{ margin: '16px 0' }}>
+              <strong>{selectedSeatIds.length} seat(s) selected</strong>
+            </div>
+
+            <div style={{ display: 'grid', gap: '10px' }}>
+              <button
+                className="danger-btn-filled full"
+                disabled={!selectedSeatIds.length || submitting}
+                onClick={() => handleUpdateBlocking(true)}
+              >
+                {submitting ? 'Updating…' : 'Block Selected Seats'}
+              </button>
+
+              <button
+                className="secondary-btn full"
+                disabled={!selectedSeatIds.length || submitting}
+                onClick={() => handleUpdateBlocking(false)}
+              >
+                {submitting ? 'Updating…' : 'Unblock Selected Seats'}
+              </button>
+
+              <button className="text-btn full" style={{ marginTop: '10px' }} onClick={onClose}>
+                Done / Close
+              </button>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedEventForAttendees, setSelectedEventForAttendees] = useState(null)
+  const [selectedEventForBlocking, setSelectedEventForBlocking] = useState(null)
   const [claimingRole, setClaimingRole] = useState(false)
   const [seeding, setSeeding] = useState(false)
   const queryClient = useQueryClient()
@@ -358,7 +525,6 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
     }
   }
 
-  // State 1: Not signed in
   if (!user) {
     return (
       <div className="organizer-page">
@@ -402,7 +568,6 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
     )
   }
 
-  // State 2: Signed in as Student
   if (!isOrganizer) {
     return (
       <div className="organizer-page">
@@ -432,7 +597,6 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
     )
   }
 
-  // State 3: Signed in as Organizer or Admin
   const totalEvents = events.length
   const totalBookings = events.reduce((acc, ev) => acc + (ev.total_bookings || 0), 0)
   const totalBookedSeats = events.reduce((acc, ev) => acc + (ev.booked_seats || 0), 0)
@@ -567,13 +731,25 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
                     </div>
                   </div>
 
-                  <button
-                    className="secondary-btn"
-                    onClick={() => setSelectedEventForAttendees(ev)}
-                  >
-                    <Users size={15} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '6px' }} />
-                    View Attendees ({ev.total_bookings})
-                  </button>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <button
+                      className="secondary-btn"
+                      onClick={() => setSelectedEventForBlocking(ev)}
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                    >
+                      <Ban size={15} />
+                      Block Seats (VIP / Guests)
+                    </button>
+
+                    <button
+                      className="secondary-btn"
+                      onClick={() => setSelectedEventForAttendees(ev)}
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                    >
+                      <Users size={15} />
+                      View Attendees ({ev.total_bookings})
+                    </button>
+                  </div>
                 </div>
               </article>
             )
@@ -596,6 +772,14 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
         <AttendeesModal
           event={selectedEventForAttendees}
           onClose={() => setSelectedEventForAttendees(null)}
+          onNotify={onNotify}
+        />
+      )}
+
+      {selectedEventForBlocking && (
+        <BlockSeatsModal
+          event={selectedEventForBlocking}
+          onClose={() => setSelectedEventForBlocking(null)}
           onNotify={onNotify}
         />
       )}
