@@ -60,17 +60,18 @@ export function SeatModal({ event, user, onClose, onSignIn, onViewBookings }) {
     }
   }, [event.id, user, confirmedBooking])
 
-  // Group seats by row label (A, B, C...)
-  const rows = useMemo(() => {
+ const rows = useMemo(() => {
     const map = seats.reduce((acc, seat) => {
       (acc[seat.row] ||= []).push(seat)
       return acc
     }, {})
-    // Sort seats in each row by position
-    Object.keys(map).forEach((r) => {
-      map[r].sort((a, b) => a.position - b.position)
+
+    // Sort rows strictly alphabetically (A -> B -> C -> D -> E -> F -> G)
+    const sortedRowKeys = Object.keys(map).sort((a, b) => a.localeCompare(b))
+
+    return sortedRowKeys.map((r) => {
+      return map[r].sort((a, b) => a.position - b.position)
     })
-    return Object.values(map)
   }, [seats])
 
   // Countdown timer for active hold

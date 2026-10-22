@@ -10,6 +10,8 @@ import {
   Layers,
   Sparkles,
   Ban,
+  UserCog,
+  ShieldCheck,
 } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { organizerApi, eventApi } from '../../services/api'
@@ -345,12 +347,15 @@ function BlockSeatsModal({ event, onClose, onNotify }) {
       (acc[seat.row] ||= []).push(seat)
       return acc
     }, {})
-    Object.keys(map).forEach((r) => {
-      map[r].sort((a, b) => a.position - b.position)
-    })
-    return Object.values(map)
-  }, [seats])
 
+    // Sort rows strictly alphabetically (A -> B -> C -> D -> E -> F -> G)
+    const sortedRowKeys = Object.keys(map).sort((a, b) => a.localeCompare(b))
+
+    return sortedRowKeys.map((r) => {
+      return map[r].sort((a, b) => a.position - b.position)
+    })
+  }, [seats])
+  
   const toggleSeat = (seat) => {
     if (seat.status === 'BOOKED') return
     setSelectedSeatIds((prev) =>
@@ -496,12 +501,134 @@ function BlockSeatsModal({ event, onClose, onNotify }) {
   )
 }
 
+function ManageUsersModal({ onClose, onNotify }) {
+  const [updatingId, setUpdatingId] = useState(null)
+  const queryClient = useQueryClient()
+
+  const { data: userList = [], isLoading, isError, error } = useQuery({
+    queryKey: ['admin-users'],
+    queryFn: organizerApi.getUsers,
+  })
+
+  const handleRoleChange = async (targetUser, newRole) => {
+    setUpdatingId(targetUser.id)
+    try {
+      const res = await organizerApi.updateUserRole(targetUser.id, newRole)
+      onNotify(res.message)
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] })
+      queryClient.invalidateQueries({ queryKey: ['account'] })
+    } catch (err) {
+      alert(errorMessage(err, 'Failed to update user role.'))
+    } finally {
+      setUpdatingId(null)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Manage Users">
+      <div className="modal attendees-modal" style={{ maxWidth: '820px' }}>
+        <div className="modal-head">
+          <div>
+            <h2>User Management & Organizer Appointments</h2>
+            <div className="muted">Appoint verified students as Event Organizers or revoke privileges</div>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Close">
+            <X />
+          </button>
+        </div>
+
+        <div className="attendees-body">
+          {isLoading ? (
+            <p className="muted loading">Loading user accounts…</p>
+          ) : isError ? (
+            <p className="form-message">Could not load users: {errorMessage(error, 'Error')}</p>
+          ) : (
+            <div className="table-responsive">
+              <table className="attendee-table">
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Current Role</th>
+                    <th>Status</th>
+                    <th style={{ textAlign: 'right' }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {userList.map((u) => {
+                    const isStudent = u.role === 'STUDENT'
+                    const isOrganizer = u.role === 'ORGANIZER'
+                    const isAdmin = u.role === 'ADMIN'
+
+                    return (
+                      <tr key={u.id}>
+                        <td>
+                          <strong>{u.full_name}</strong>
+                          <div className="muted" style={{ fontSize: '0.78rem' }}>{u.email}</div>
+                        </td>
+                        <td>
+                          <span
+                            className={`status-badge-small ${
+                              isAdmin
+                                ? 'status-confirmed'
+                                : isOrganizer
+                                ? 'status-confirmed'
+                                : ''
+                            }`}
+                            style={{
+                              background: isAdmin ? '#f0efff' : isOrganizer ? '#e6f9f0' : '#f1f5f9',
+                              color: isAdmin ? '#5b4ce2' : isOrganizer ? '#16794c' : '#475569',
+                            }}
+                          >
+                            {u.role}
+                          </span>
+                        </td>
+                        <td>
+                          <span style={{ fontSize: '0.78rem', color: u.is_email_verified ? '#16794c' : '#b45309' }}>
+                            {u.is_email_verified ? 'Verified' : 'Unverified'}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          {isAdmin ? (
+                            <span className="muted" style={{ fontSize: '0.78rem' }}>System Admin</span>
+                          ) : isStudent ? (
+                            <button
+                              className="primary"
+                              style={{ padding: '6px 12px', fontSize: '0.78rem' }}
+                              disabled={updatingId === u.id}
+                              onClick={() => handleRoleChange(u, 'ORGANIZER')}
+                            >
+                              {updatingId === u.id ? 'Updating…' : 'Appoint as Organizer'}
+                            </button>
+                          ) : (
+                            <button
+                              className="secondary-btn"
+                              style={{ padding: '6px 12px', fontSize: '0.78rem', color: '#c3382b' }}
+                              disabled={updatingId === u.id}
+                              onClick={() => handleRoleChange(u, 'STUDENT')}
+                            >
+                              {updatingId === u.id ? 'Updating…' : 'Revoke Organizer'}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedEventForAttendees, setSelectedEventForAttendees] = useState(null)
   const [selectedEventForBlocking, setSelectedEventForBlocking] = useState(null)
-  const [claimingRole, setClaimingRole] = useState(false)
   const [seeding, setSeeding] = useState(false)
+  const [showManageUsersModal, setShowManageUsersModal] = useState(false)
   const queryClient = useQueryClient()
 
   const isOrganizer = user && (user.role === 'ORGANIZER' || user.role === 'ADMIN')
@@ -511,19 +638,6 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
     queryFn: organizerApi.events,
     enabled: !!isOrganizer,
   })
-
-  const handleClaimRole = async () => {
-    setClaimingRole(true)
-    try {
-      await organizerApi.claimRole()
-      await queryClient.invalidateQueries({ queryKey: ['account'] })
-      onNotify('Your account was upgraded to Event Organizer!')
-    } catch (err) {
-      onNotify(errorMessage(err, 'Failed to upgrade role.'))
-    } finally {
-      setClaimingRole(false)
-    }
-  }
 
   if (!user) {
     return (
@@ -568,34 +682,34 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
     )
   }
 
-  if (!isOrganizer) {
-    return (
-      <div className="organizer-page">
-        <div className="portal-hero">
-          <div className="eyebrow" style={{ color: '#5b4ce2' }}>Organizer Access</div>
-          <h2>Become an Event Organizer</h2>
-          <p className="muted">
-            You are currently signed in as <strong>{user.full_name}</strong> ({user.email}) with the <strong>Student</strong> role.
-            The Organizer Portal is reserved for club coordinators and event hosts to publish events.
+if (!isOrganizer) {
+  return (
+    <div className="organizer-page">
+      <div className="portal-hero">
+        <div className="eyebrow" style={{ color: '#5b4ce2' }}>Student Portal</div>
+        <h2>Event Organizer Access</h2>
+        <p className="muted">
+          You are signed in as <strong>{user.full_name}</strong> ({user.email}) with a <strong>Student Account</strong>.
+        </p>
+
+        <div className="role-claim-card" style={{ background: '#f8f9fd', borderColor: '#e2e8f0' }}>
+          <ShieldCheck size={32} style={{ color: '#5b4ce2', margin: '0 auto 10px' }} />
+          <h3 style={{ color: '#172233' }}>Organizer Privileges are Appointed by Admins</h3>
+          <p className="muted" style={{ maxWidth: '520px', margin: '8px auto' }}>
+            To schedule campus events, manage seating plans, and admit students, you must be appointed as an Event Organizer by the system administrator.
           </p>
+          <p className="muted" style={{ fontSize: '0.8rem', marginTop: '12px' }}>
+            Please contact <strong>admin@example.com</strong> or your department coordinator to request organizer access.
+          </p>
+        </div>
 
-          <div className="role-claim-card">
-            <h3>Try the Organizer Dashboard</h3>
-            <p className="muted">
-              For evaluation and local demonstration, you can upgrade your account to an Organizer with one click.
-            </p>
-            <button className="primary" onClick={handleClaimRole} disabled={claimingRole}>
-              {claimingRole ? 'Activating…' : 'Enable Organizer Mode for this Account'}
-            </button>
-          </div>
-
-          <div className="portal-actions" style={{ marginTop: '24px' }}>
-            <button className="text-btn" onClick={onBrowse}>Return to Discover</button>
-          </div>
+        <div className="portal-actions" style={{ marginTop: '24px' }}>
+          <button className="primary" onClick={onBrowse}>Browse Upcoming Events</button>
         </div>
       </div>
-    )
-  }
+    </div>
+  )
+}
 
   const totalEvents = events.length
   const totalBookings = events.reduce((acc, ev) => acc + (ev.total_bookings || 0), 0)
@@ -621,21 +735,22 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
   return (
     <div className="organizer-page">
       <div className="section-top">
-        <div>
-          <div className="eyebrow" style={{ color: '#5b4ce2' }}>
-            {user.role === 'ADMIN' ? 'Administrator' : 'Organizer'} Portal
-          </div>
-          <h2 className="section-title">Organizer Dashboard</h2>
-          <p className="section-copy">
-            Welcome back, {user.full_name}. Oversee your scheduled events and seating allocations.
-          </p>
-        </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {user.role === 'ADMIN' && (
+            <button
+              className="secondary-btn"
+              onClick={() => setShowManageUsersModal(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+            >
+              <UserCog size={15} />
+              Appoint Organizers
+            </button>
+          )}
           <button
             className="secondary-btn"
             onClick={() => handleSeedDemoData(true)}
             disabled={seeding}
-            title="Wipe and restore 5 events across 2 venues with sample bookings"
+            title="Wipe and restore demo events"
           >
             <Sparkles size={15} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '6px' }} />
             {seeding ? 'Seeding…' : 'Re-Seed Demo Data'}
@@ -644,6 +759,15 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
             <Plus size={16} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '6px' }} />
             Create New Event
           </button>
+        </div>
+        <div>
+          <div className="eyebrow" style={{ color: '#5b4ce2' }}>
+            {user.role === 'ADMIN' ? 'Administrator' : 'Organizer'} Portal
+          </div>
+          <h2 className="section-title">Organizer Dashboard</h2>
+          <p className="section-copy">
+            Welcome back, {user.full_name}. Oversee your scheduled events and seating allocations.
+          </p>
         </div>
       </div>
 
@@ -780,6 +904,13 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
         <BlockSeatsModal
           event={selectedEventForBlocking}
           onClose={() => setSelectedEventForBlocking(null)}
+          onNotify={onNotify}
+        />
+      )}
+
+      {showManageUsersModal && (
+        <ManageUsersModal
+          onClose={() => setShowManageUsersModal(false)}
           onNotify={onNotify}
         />
       )}

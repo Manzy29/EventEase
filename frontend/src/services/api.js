@@ -38,7 +38,8 @@ export const organizerApi = {
   checkInTicket: (ticketCode) => api.post(`/organizer/tickets/${ticketCode}/check-in`).then(({ data }) => data),
   venues: () => api.get('/organizer/venues').then(({ data }) => data),
   categories: () => api.get('/organizer/categories').then(({ data }) => data),
-  claimRole: () => api.post('/organizer/claim-role').then(({ data }) => data),
+  getUsers: () => api.get('/organizer/users').then(({ data }) => data),
+  updateUserRole: (userId, role) => api.put(`/organizer/users/${userId}/role`, { role }).then(({ data }) => data),
   seedDemoData: (reset = false) => api.post('/system/seed-data', null, { params: { reset } }).then(({ data }) => data),
    blockSeats: (eventId, eventSeatIds, isBlocked = true) =>
     api.post(`/organizer/events/${eventId}/block-seats`, {

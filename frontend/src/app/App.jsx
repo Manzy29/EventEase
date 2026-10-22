@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Routes, Route, useNavigate } from 'react-router-dom'
+import { Routes, Route, useNavigate, Navigate } from 'react-router-dom'
 import { CalendarDays, ChevronRight, MapPin, Search, Ticket, Info, Sparkles } from 'lucide-react'
 import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query'
 import { authApi, eventApi, systemApi } from '../services/api'
@@ -46,15 +46,29 @@ function DiscoverView({ onBook, onViewDetails }) {
           <h1>Find the moments you’ll remember.</h1>
           <p>Discover workshops, shows, talks, and tournaments around campus. Reserve your seat in a few calm, clear steps.</p>
         </div>
-        <div className="hero-card">
-          <div className="date-chip">THIS WEEK</div>
-          <h3>Code & Coffee: AI Edition</h3>
-          <p>Practical tools, good coffee and bigger ideas.</p>
-          <div className="hero-card-footer">
-            <span>Wed, 21 Oct</span>
-            <span>IS Seminar Hall</span>
+        
+        {events.length > 0 ? (
+          <div
+            className="hero-card"
+            onClick={() => onViewDetails(events[0])}
+            style={{ cursor: 'pointer' }}
+            title="Click to view details"
+          >
+            <div className="date-chip">UPCOMING NEXT</div>
+            <h3>{events[0].title}</h3>
+            <p>{events[0].description?.slice(0, 80)}...</p>
+            <div className="hero-card-footer">
+              <span>{formatDate(events[0].start_at)}</span>
+              <span>{events[0].venue}</span>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="hero-card">
+            <div className="date-chip">CAMPUS TICKETS</div>
+            <h3>No Active Events</h3>
+            <p>Check back soon for new workshops and tournaments.</p>
+          </div>
+        )}
       </header>
 
       <main className="content">
@@ -242,14 +256,19 @@ function CampusTix() {
         <Route
           path="/organizers"
           element={
-            <main className="content">
-              <OrganizersView
-                user={user}
-                onSignIn={() => setAuthMode('login')}
-                onBrowse={() => navigate('/')}
-                onNotify={(msg) => setToast(msg)}
-              />
-            </main>
+            user && (user.role === 'ORGANIZER' || user.role === 'ADMIN') ? (
+              <main className="content">
+                <OrganizersView
+                  user={user}
+                  onSignIn={() => setAuthMode('login')}
+                  onBrowse={() => navigate('/')}
+                  onNotify={(msg) => setToast(msg)}
+                />
+              </main>
+            ) : (
+              // If not approved/authorized, redirect silently to home
+              <Navigate to="/" replace />
+            )
           }
         />
       </Routes>

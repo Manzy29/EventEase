@@ -5,6 +5,7 @@ import { Ticket, Menu, X } from 'lucide-react'
 export function Navbar({ user, onSignIn, onRegister, onSignOut }) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const location = useLocation()
+  const isOrganizerOrAdmin = user && (user.role === 'ORGANIZER' || user.role === 'ADMIN')
 
   const isActive = (path) => {
     if (path === '/' && location.pathname === '/') return true
@@ -35,12 +36,14 @@ export function Navbar({ user, onSignIn, onRegister, onSignOut }) {
           >
             My bookings
           </Link>
-          <Link
-            to="/organizers"
-            className={isActive('/organizers') ? 'active' : ''}
-          >
-            For organizers
-          </Link>
+           {isOrganizerOrAdmin && (
+            <Link
+              to="/organizers"
+              className={isActive('/organizers') ? 'active' : ''}
+            >
+              For organizers
+            </Link>
+          )}
         </div>
         <div className="nav-actions">
           {user ? (
@@ -84,13 +87,15 @@ export function Navbar({ user, onSignIn, onRegister, onSignOut }) {
           >
             My bookings
           </Link>
-          <Link
-            to="/organizers"
-            className={isActive('/organizers') ? 'active' : ''}
-            onClick={() => setMobileMenuOpen(false)}
-          >
-            For organizers
-          </Link>
+          {isOrganizerOrAdmin && (
+            <Link
+              to="/organizers"
+              className={isActive('/organizers') ? 'active' : ''}
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              For organizers
+            </Link>
+          )}
           <div className="mobile-nav-auth">
             {user ? (
               <button
