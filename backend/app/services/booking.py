@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.config import get_settings
 from app.models.domain import (
     Booking, BookingOTPVerification, BookingSeat, BookingStatus, Cancellation,
-    Event, EventSeat, HoldStatus, SeatHold, SeatHoldItem, Ticket, User,
+    Event, EventSeat, HoldStatus, SeatHold, SeatHoldItem, Ticket, User
 )
 from app.services.email import queue_email
 
@@ -263,3 +263,68 @@ def cancel_booking(db: Session, user: User, booking_id: str, reason: str = "User
         db.add(Cancellation(booking_id=booking.id, user_id=user.id, reason=reason))
         queue_email(db, user.email, "BOOKING_CANCELLATION", {"subject": f"CampusTix cancellation {booking.booking_reference}"})
     return booking
+
+def cancel_booking_seat(
+    db: Session, user: User, booking_id: str, booking_seat_id: str, reason: str = "User cancelled single seat"
+) -> dict:
+    """Cancels a specific seat from a booking and releases only that seat back into inventory."""
+    if db.in_transaction():
+        db.commit()
+    with db.begin():
+        booking = db.scalar(
+            select(Booking)
+            .where(Booking.id == booking_id)
+            .with_for_update()
+        )
+        if not booking or booking.user_id != user.id:
+            raise HTTPException(status_code=404, detail="Booking not found.")
+
+        if booking.status != BookingStatus.CONFIRMED:
+            raise HTTPException(status_code=409, detail="Only confirmed bookings can have seats cancelled.")
+
+        event = db.get(Event, booking.event_id)
+        deadline = ensure_utc(event.cancellation_deadline) if event else None
+        if deadline and now() > deadline:
+            raise HTTPException(status_code=409, detail="The cancellation deadline has passed.")
+
+        # Find the specific seat
+        target_seat = next((s for s in booking.seats if s.id == booking_seat_id), None)
+        if not target_seat:
+            raise HTTPException(status_code=404, detail="Seat record not found in this booking.")
+
+        if target_seat.released_at is not None:
+            raise HTTPException(status_code=409, detail="This seat has already been cancelled.")
+
+        # Release only this seat
+        target_seat.released_at = now()
+
+        if target_seat.ticket:
+            target_seat.ticket.status = "CANCELLED"
+
+        db.add(Cancellation(booking_id=booking.id, user_id=user.id, reason=reason))
+
+        # Check if all seats in the booking are now cancelled
+        active_remaining = [s for s in booking.seats if s.released_at is None]
+        all_cancelled = len(active_remaining) == 0
+        if all_cancelled:
+            booking.status = BookingStatus.CANCELLED
+            booking.cancelled_at = now()
+
+        queue_email(
+            db,
+            user.email,
+            "BOOKING_CANCELLATION",
+            {
+                "subject": f"Seat cancelled from booking {booking.booking_reference}",
+                "html": f"<p>A seat from your booking <strong>{booking.booking_reference}</strong> has been cancelled.</p>",
+            },
+        )
+
+    db.refresh(booking)
+    return {
+        "booking_id": booking.id,
+        "booking_reference": booking.booking_reference,
+        "all_cancelled": all_cancelled,
+        "booking_status": booking.status.value if hasattr(booking.status, "value") else str(booking.status),
+        "cancelled_seat_id": booking_seat_id,
+    }

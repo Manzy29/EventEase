@@ -291,3 +291,39 @@ button { cursor: pointer; }
   color: #788297;
   flex-shrink: 0;
 }
+
+/* Removable Seat Tag in My Bookings */
+.removable-seat-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #e9e7ff;
+  color: #5144ce;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  transition: all 0.15s ease;
+}
+
+.removable-seat-tag:hover {
+  background: #dfdcff;
+}
+
+.remove-seat-btn {
+  background: transparent;
+  border: none;
+  color: #8b5cf6;
+  cursor: pointer;
+  padding: 1px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background 0.15s;
+}
+
+.remove-seat-btn:hover {
+  background: #fee2e2;
+  color: #ef4444;
+}

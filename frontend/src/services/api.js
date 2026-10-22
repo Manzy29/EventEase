@@ -27,6 +27,8 @@ export const authApi = {
 export const bookingApi = {
   myBookings: () => api.get('/bookings/me').then(({ data }) => data),
   cancel: (bookingId) => api.post(`/bookings/${bookingId}/cancel`).then(({ data }) => data),
+  cancelSeat: (bookingId, bookingSeatId) =>
+    api.post(`/bookings/${bookingId}/seats/${bookingSeatId}/cancel`).then(({ data }) => data),
 }
 
 export const organizerApi = {
