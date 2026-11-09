@@ -1,11 +1,10 @@
 """Create rich demonstration data across multiple venues, categories, events, and bookings.
 
 Usage:
-    python database/seed.py             # Additive: adds missing venues, events, categories & demo bookings
-    python database/seed.py --reset     # Clean reset: wipes demo tables and reseeds fresh
+    python ../database/seed.py --reset   (from backend folder)
+    python database/seed.py --reset      (from project root)
 """
 from datetime import UTC, datetime, timedelta
-import os
 from pathlib import Path
 import secrets
 import sys
@@ -15,25 +14,27 @@ backend_path = Path(__file__).resolve().parent.parent / "backend"
 if str(backend_path) not in sys.path:
     sys.path.insert(0, str(backend_path))
 
-from sqlalchemy import text  # noqa: E402
-from sqlalchemy.orm import Session  # noqa: E402
+from sqlalchemy import text
+from sqlalchemy.orm import Session
 
-from app.core.security import hash_password  # noqa: E402
-from app.db.session import Base, SessionLocal, engine  # noqa: E402
-from app.models.domain import (  # noqa: E402
+from app.core.security import hash_password
+from app.db.session import Base, SessionLocal
+from app.models.domain import (
     Booking, BookingSeat, BookingStatus, Event, EventCategory, EventSeat,
-    HoldStatus, Role, SeatHold, SeatHoldItem, Ticket, User, Venue, VenueRow, VenueSeat
+    Role, SeatHold, SeatHoldItem, Ticket, User, Venue, VenueRow, VenueSeat
 )
 
 
 def ensure_schema_updated(db: Session) -> None:
-    """Ensure all tables and new columns (like checked_in_at, poster_url) exist."""
+    """Ensure all tables and new columns exist before seeding."""
     Base.metadata.create_all(bind=db.get_bind())
     dialect = db.get_bind().dialect.name
     if dialect == "postgresql":
         try:
             db.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS checked_in_at TIMESTAMPTZ;"))
             db.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS poster_url VARCHAR(500);"))
+            db.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS ticket_price NUMERIC(10,2) DEFAULT 0.00;"))
+            db.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS total_amount NUMERIC(10,2) DEFAULT 0.00;"))
             db.commit()
         except Exception:
             db.rollback()
@@ -44,8 +45,16 @@ def seed_database(db: Session, reset: bool = False, admin_password: str = "Campu
     ensure_schema_updated(db)
 
     if reset:
-        print("Reset flag active: clearing existing booking, event, and venue data...")
-        # Order matters for foreign key cascading
+        print("Reset flag active: clearing existing bookings, events, and venues...")
+        # Optional tables (cancellations and OTPs)
+        try:
+            from app.models.domain import BookingOTPVerification, Cancellation
+            db.query(Cancellation).delete()
+            db.query(BookingOTPVerification).delete()
+        except Exception:
+            pass
+
+        # Core tables in foreign-key dependency order
         db.query(Ticket).delete()
         db.query(BookingSeat).delete()
         db.query(SeatHoldItem).delete()
@@ -57,7 +66,8 @@ def seed_database(db: Session, reset: bool = False, admin_password: str = "Campu
         db.query(VenueRow).delete()
         db.query(Venue).delete()
         db.query(EventCategory).delete()
-        # Delete demo users
+
+        # Delete demo accounts
         demo_emails = [
             "admin@example.com",
             "organizer@example.com",
@@ -108,11 +118,9 @@ def seed_database(db: Session, reset: bool = False, admin_password: str = "Campu
         else:
             categories[name] = existing
 
-   # 3. Venue 1: IS Seminar Hall (Actual 7-Row Curved Amphitheatre Layout)
-    venue1 = db.query(Venue).filter_by(name="IS Seminar Hall (sample configuration)").first()
+    # 3. Venue 1: IS Seminar Hall (Actual 7-Row Curved Amphitheatre Layout)
+    venue1 = db.query(Venue).filter(Venue.name.ilike("IS Seminar Hall%")).first()
     v1_seats: list[VenueSeat] = []
-    
-    # 7 Rows: [Row A: 7, Row B: 9, Row C: 11, Row D: 13, Row E: 15, Row F: 17, Row G: 17] per side
     row_configs = [
         ("A", 7),
         ("B", 9),
@@ -125,8 +133,8 @@ def seed_database(db: Session, reset: bool = False, admin_password: str = "Campu
 
     if not venue1:
         venue1 = Venue(
-            name="IS Seminar Hall (sample configuration)",
-            location="Information Science Block, 3rd Floor",
+            name="IS Seminar Hall",
+            location="Information Science Block,Ground Floor",
             description="Acoustically treated seminar hall with dual projection screens and amphitheatric seating.",
         )
         db.add(venue1)
@@ -159,7 +167,7 @@ def seed_database(db: Session, reset: bool = False, admin_password: str = "Campu
             .all()
         )
 
-    # 4. Venue 2: Main Campus Auditorium (36 seats: 3 rows x 12 seats)
+    # 4. Venue 2: Main Campus Auditorium (36 seats)
     venue2 = db.query(Venue).filter_by(name="Sir MV Central Auditorium").first()
     v2_seats: list[VenueSeat] = []
     if not venue2:
@@ -171,7 +179,7 @@ def seed_database(db: Session, reset: bool = False, admin_password: str = "Campu
         db.add(venue2)
         db.flush()
         for r_idx, r_label in enumerate(["A", "B", "C"]):
-            row = VenueRow(venue_id=venue2.id, row_label=r_label, display_order=r_idx)
+            row = VenueRow(venue_id=venue2.id, row_label=r_label, display_order=r_idx + 1)
             db.add(row)
             db.flush()
             for s_num in range(1, 13):
@@ -188,7 +196,7 @@ def seed_database(db: Session, reset: bool = False, admin_password: str = "Campu
             .all()
         )
 
-    # 5. Events
+    # 5. Events with Dynamic Ticket Pricing
     now = datetime.now(UTC)
     events_config = [
         {
@@ -197,6 +205,7 @@ def seed_database(db: Session, reset: bool = False, admin_password: str = "Campu
             "category": categories["WORKSHOP"],
             "venue": venue1,
             "seats": v1_seats,
+            "ticket_price": 50.00,  # ₹50
             "organizer": users["organizer@example.com"],
             "start": now + timedelta(days=2, hours=10),
             "duration_hours": 3,
@@ -207,6 +216,7 @@ def seed_database(db: Session, reset: bool = False, admin_password: str = "Campu
             "category": categories["HACKATHON"],
             "venue": venue1,
             "seats": v1_seats,
+            "ticket_price": 100.00,  # ₹100
             "organizer": users["organizer@example.com"],
             "start": now + timedelta(days=5, hours=9),
             "duration_hours": 24,
@@ -217,6 +227,7 @@ def seed_database(db: Session, reset: bool = False, admin_password: str = "Campu
             "category": categories["CULTURAL"],
             "venue": venue2,
             "seats": v2_seats,
+            "ticket_price": 150.00,  # ₹150
             "organizer": users["cultural@example.com"],
             "start": now + timedelta(days=7, hours=18),
             "duration_hours": 4,
@@ -227,19 +238,10 @@ def seed_database(db: Session, reset: bool = False, admin_password: str = "Campu
             "category": categories["TECHNICAL"],
             "venue": venue1,
             "seats": v1_seats,
+            "ticket_price": 0.00,  # Free
             "organizer": users["organizer@example.com"],
             "start": now + timedelta(days=10, hours=14),
             "duration_hours": 2,
-        },
-        {
-            "title": "Inter-Department Badminton Tournament",
-            "description": "Men's and women's singles & doubles championship with live court spectator seating.",
-            "category": categories["SPORTS"],
-            "venue": venue2,
-            "seats": v2_seats,
-            "organizer": users["cultural@example.com"],
-            "start": now + timedelta(days=12, hours=9),
-            "duration_hours": 6,
         },
     ]
 
@@ -255,6 +257,7 @@ def seed_database(db: Session, reset: bool = False, admin_password: str = "Campu
                 category_id=cfg["category"].id,
                 venue_id=cfg["venue"].id,
                 organizer_id=cfg["organizer"].id,
+                ticket_price=float(cfg["ticket_price"]),
                 start_at=start_at,
                 end_at=end_at,
                 registration_opens_at=now - timedelta(days=2),
@@ -273,17 +276,18 @@ def seed_database(db: Session, reset: bool = False, admin_password: str = "Campu
             event_seats = db.query(EventSeat).filter_by(event_id=event.id).all()
             created_events.append((event, event_seats))
 
-    # 6. Sample Initial Bookings for Demonstration
-    # Booking 1: Alice on Event 1 (Code & Coffee)
+    # 6. Sample Initial Bookings with Revenue Calculation
     event1, event1_seats = created_events[0]
     alice = users["alice@example.com"]
     alice_existing = db.query(Booking).filter_by(user_id=alice.id, event_id=event1.id).first()
     if not alice_existing and len(event1_seats) >= 2:
+        unit_price = float(getattr(event1, "ticket_price", 50.0) or 50.0)
         alice_booking = Booking(
             booking_reference=f"CTX-{secrets.token_hex(5).upper()}",
             user_id=alice.id,
             event_id=event1.id,
             status=BookingStatus.CONFIRMED,
+            total_amount=unit_price * 2,  # 2 seats * ₹50 = ₹100
             confirmed_at=now - timedelta(hours=5),
         )
         db.add(alice_booking)
@@ -295,16 +299,17 @@ def seed_database(db: Session, reset: bool = False, admin_password: str = "Campu
             db.flush()
             db.add(Ticket(booking_seat_id=bs.id, ticket_code=f"TIX-{secrets.token_urlsafe(10)}"))
 
-    # Booking 2: Bob on Event 3 (Symphony Night)
     event3, event3_seats = created_events[2]
     bob = users["bob@example.com"]
     bob_existing = db.query(Booking).filter_by(user_id=bob.id, event_id=event3.id).first()
     if not bob_existing and len(event3_seats) >= 1:
+        unit_price = float(getattr(event3, "ticket_price", 150.0) or 150.0)
         bob_booking = Booking(
             booking_reference=f"CTX-{secrets.token_hex(5).upper()}",
             user_id=bob.id,
             event_id=event3.id,
             status=BookingStatus.CONFIRMED,
+            total_amount=unit_price * 1,  # 1 seat * ₹150 = ₹150
             confirmed_at=now - timedelta(hours=2),
         )
         db.add(bob_booking)
@@ -318,44 +323,19 @@ def seed_database(db: Session, reset: bool = False, admin_password: str = "Campu
 
     db.commit()
 
-    total_events = db.query(Event).count()
-    total_venues = db.query(Venue).count()
-    total_seats = db.query(VenueSeat).count()
-    total_bookings = db.query(Booking).count()
-
-    summary = {
-        "venues_count": total_venues,
-        "seats_count": total_seats,
-        "events_count": total_events,
-        "bookings_count": total_bookings,
-        "admin_password": admin_password,
+    return {
+        "venues_count": db.query(Venue).count(),
+        "seats_count": db.query(VenueSeat).count(),
+        "events_count": db.query(Event).count(),
+        "bookings_count": db.query(Booking).count(),
     }
-    return summary
-
-
-def main() -> None:
-    reset = "--reset" in sys.argv or "-r" in sys.argv or os.getenv("RESET_DB", "0") in ("1", "true", "True")
-    admin_password = os.getenv("DEMO_ADMIN_PASSWORD", "CampusTix@2026")
-
-    print(f"Connecting to database and seeding demonstration data (reset={reset})...")
-    db = SessionLocal()
-    try:
-        summary = seed_database(db, reset=reset, admin_password=admin_password)
-        print("=" * 60)
-        print("CampusTix Demonstration Data Ready:")
-        print(f"  * Venues: {summary['venues_count']} venues ({summary['seats_count']} physical seats total)")
-        print(f"  * Events: {summary['events_count']} campus events across Technical, Workshop, Cultural, Hackathon, Sports")
-        print(f"  * Confirmed Bookings: {summary['bookings_count']} pre-booked reservations")
-        print("\nDemo Accounts (Password for all: '{}'):".format(summary['admin_password']))
-        print("  - Admin:        admin@example.com")
-        print("  - Organizer 1:  organizer@example.com (Computer Society)")
-        print("  - Organizer 2:  cultural@example.com  (Fine Arts Club)")
-        print("  - Student 1:    alice@example.com     (has QR ticket booked for AI Workshop)")
-        print("  - Student 2:    bob@example.com       (has QR ticket booked for Symphony Night)")
-        print("=" * 60)
-    finally:
-        db.close()
 
 
 if __name__ == "__main__":
-    main()
+    db = SessionLocal()
+    try:
+        summary = seed_database(db, reset="--reset" in sys.argv)
+        print("Database seeded successfully with prices & layout!")
+        print(summary)
+    finally:
+        db.close()

@@ -117,6 +117,7 @@ class Event(Base):
     registration_closes_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancellation_deadline: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     status: Mapped[str] = mapped_column(String(20), default="DRAFT", index=True)
+    ticket_price: Mapped[float] = mapped_column(default=0.0)
     category: Mapped[EventCategory] = relationship()
     venue: Mapped[Venue] = relationship()
     organizer: Mapped[User] = relationship()
@@ -167,6 +168,7 @@ class Booking(Base):
     user: Mapped[User] = relationship(back_populates="bookings")
     event: Mapped[Event] = relationship()
     seats: Mapped[list[BookingSeat]] = relationship(back_populates="booking", cascade="all, delete-orphan")
+    total_amount: Mapped[float] = mapped_column(default=0.0)
 
 
 class BookingSeat(Base):

@@ -1,11 +1,11 @@
--- CampusTix reference schema. Alembic/SQLAlchemy is the migration authority.
--- The crucial invariant allows historical cancelled bookings while preventing
--- two active allocations of an event seat.
+-- EventEase / CampusTix Database Schema
+-- Course: Database Management Systems (24CS520)
+
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- 1. Users and Authentication
-CREATE TABLE users (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+-- 1. Users and Authentication (8 attributes)
+CREATE TABLE IF NOT EXISTS users (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
   full_name varchar(120) NOT NULL,
   email varchar(320) NOT NULL UNIQUE,
   password_hash varchar(512) NOT NULL,
@@ -15,38 +15,41 @@ CREATE TABLE users (
   created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE email_verification_tokens (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS email_verification_tokens (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
+  user_id varchar(36) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   token_hash varchar(128) NOT NULL UNIQUE,
   expires_at timestamptz NOT NULL,
   consumed_at timestamptz,
   attempt_count integer NOT NULL DEFAULT 0,
   created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX ix_email_verification_tokens_user_id ON email_verification_tokens(user_id);
-CREATE INDEX ix_email_verification_tokens_expires_at ON email_verification_tokens(expires_at);
+CREATE INDEX IF NOT EXISTS ix_email_verification_tokens_user_id ON email_verification_tokens(user_id);
+CREATE INDEX IF NOT EXISTS ix_email_verification_tokens_expires_at ON email_verification_tokens(expires_at);
 
--- 2. Venues and Physical Seating Geometry
-CREATE TABLE venues (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+-- 2. Venues & Seating Geometry (>= 5 attributes each)
+CREATE TABLE IF NOT EXISTS venues (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
   name varchar(160) NOT NULL UNIQUE,
   description text,
   location varchar(240),
-  is_active boolean NOT NULL DEFAULT true
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE venue_rows (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  venue_id uuid NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS venue_rows (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
+  venue_id varchar(36) NOT NULL REFERENCES venues(id) ON DELETE CASCADE,
   row_label varchar(20) NOT NULL,
   display_order integer NOT NULL,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE(venue_id, row_label)
 );
 
-CREATE TABLE venue_seats (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  venue_row_id uuid NOT NULL REFERENCES venue_rows(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS venue_seats (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
+  venue_row_id varchar(36) NOT NULL REFERENCES venue_rows(id) ON DELETE CASCADE,
   seat_label varchar(20) NOT NULL,
   position integer NOT NULL CHECK(position >= 0),
   seat_type varchar(32) NOT NULL DEFAULT 'STANDARD',
@@ -56,20 +59,23 @@ CREATE TABLE venue_seats (
 );
 
 -- 3. Event Taxonomy & Events
-CREATE TABLE event_categories (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+CREATE TABLE IF NOT EXISTS event_categories (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
   name varchar(80) NOT NULL UNIQUE,
-  description text
+  description text,
+  is_active boolean NOT NULL DEFAULT true,
+  created_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE events (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+CREATE TABLE IF NOT EXISTS events (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
   title varchar(180) NOT NULL,
   description text NOT NULL,
   poster_url varchar(500),
-  category_id uuid NOT NULL REFERENCES event_categories(id),
-  venue_id uuid NOT NULL REFERENCES venues(id),
-  organizer_id uuid NOT NULL REFERENCES users(id),
+  category_id varchar(36) NOT NULL REFERENCES event_categories(id),
+  venue_id varchar(36) NOT NULL REFERENCES venues(id),
+  organizer_id varchar(36) NOT NULL REFERENCES users(id),
+  ticket_price numeric(10, 2) NOT NULL DEFAULT 0.00,
   start_at timestamptz NOT NULL,
   end_at timestamptz NOT NULL CHECK(end_at > start_at),
   registration_opens_at timestamptz,
@@ -77,91 +83,85 @@ CREATE TABLE events (
   cancellation_deadline timestamptz,
   status varchar(20) NOT NULL DEFAULT 'DRAFT'
 );
-CREATE INDEX ix_events_start_at ON events(start_at);
-CREATE INDEX ix_events_title ON events(title);
-CREATE INDEX ix_events_status ON events(status);
+CREATE INDEX IF NOT EXISTS ix_events_start_at ON events(start_at);
+CREATE INDEX IF NOT EXISTS ix_events_title ON events(title);
+CREATE INDEX IF NOT EXISTS ix_events_status ON events(status);
 
--- 4. Event Inventory Instantiation
-CREATE TABLE event_seats (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  event_id uuid NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-  venue_seat_id uuid NOT NULL REFERENCES venue_seats(id),
+-- 4. Event Inventory 
+CREATE TABLE IF NOT EXISTS event_seats (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
+  event_id varchar(36) NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  venue_seat_id varchar(36) NOT NULL REFERENCES venue_seats(id),
   is_blocked boolean NOT NULL DEFAULT false,
+  created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE(event_id, venue_seat_id)
 );
-CREATE INDEX ix_event_seats_event_id ON event_seats(event_id);
+CREATE INDEX IF NOT EXISTS ix_event_seats_event_id ON event_seats(event_id);
 
--- 5. Concurrency Holds (Two-Phase Reservation)
-CREATE TABLE seat_holds (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid NOT NULL REFERENCES users(id),
-  event_id uuid NOT NULL REFERENCES events(id),
+-- 5. Concurrency Holds
+CREATE TABLE IF NOT EXISTS seat_holds (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
+  user_id varchar(36) NOT NULL REFERENCES users(id),
+  event_id varchar(36) NOT NULL REFERENCES events(id),
   expires_at timestamptz NOT NULL,
   status varchar(16) NOT NULL CHECK (status IN ('ACTIVE', 'RELEASED', 'EXPIRED', 'CONSUMED')),
   created_at timestamptz NOT NULL DEFAULT now()
 );
-CREATE INDEX ix_seat_holds_active_event_expires ON seat_holds(event_id, status, expires_at);
+CREATE INDEX IF NOT EXISTS ix_seat_holds_active_event_expires ON seat_holds(event_id, status, expires_at);
 
-CREATE TABLE seat_hold_items (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  seat_hold_id uuid NOT NULL REFERENCES seat_holds(id) ON DELETE CASCADE,
-  event_seat_id uuid NOT NULL REFERENCES event_seats(id),
+CREATE TABLE IF NOT EXISTS seat_hold_items (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
+  seat_hold_id varchar(36) NOT NULL REFERENCES seat_holds(id) ON DELETE CASCADE,
+  event_seat_id varchar(36) NOT NULL REFERENCES event_seats(id),
+  seat_notes varchar(100) DEFAULT 'Standard reservation hold',
+  created_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE(seat_hold_id, event_seat_id)
 );
-CREATE INDEX ix_seat_hold_items_event_seat_id ON seat_hold_items(event_seat_id);
+CREATE INDEX IF NOT EXISTS ix_seat_hold_items_event_seat_id ON seat_hold_items(event_seat_id);
 
--- 6. Bookings, Confirmed Seats, and Digital Tickets
-CREATE TABLE bookings (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+-- 6. Bookings, Booking Seats & Digital Tickets
+CREATE TABLE IF NOT EXISTS bookings (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
   booking_reference varchar(32) NOT NULL UNIQUE,
-  user_id uuid NOT NULL REFERENCES users(id),
-  event_id uuid NOT NULL REFERENCES events(id),
-  status varchar(16) NOT NULL CHECK (status IN ('PENDING', 'CONFIRMED', 'CANCELLED', 'EXPIRED')),
+  user_id varchar(36) NOT NULL REFERENCES users(id),
+  event_id varchar(36) NOT NULL REFERENCES events(id),
+  total_amount numeric(10, 2) NOT NULL DEFAULT 0.00,
+  status varchar(24) NOT NULL CHECK (status IN ('PENDING', 'CONFIRMED', 'CANCELLED', 'EXPIRED')),
   created_at timestamptz NOT NULL DEFAULT now(),
   confirmed_at timestamptz,
   cancelled_at timestamptz
 );
-CREATE INDEX ix_bookings_user_id ON bookings(user_id);
-CREATE INDEX ix_bookings_event_id ON bookings(event_id);
+CREATE INDEX IF NOT EXISTS ix_bookings_user_id ON bookings(user_id);
+CREATE INDEX IF NOT EXISTS ix_bookings_event_id ON bookings(event_id);
 
-CREATE TABLE booking_seats (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  booking_id uuid NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
-  event_seat_id uuid NOT NULL REFERENCES event_seats(id),
+CREATE TABLE IF NOT EXISTS booking_seats (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
+  booking_id varchar(36) NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+  event_seat_id varchar(36) NOT NULL REFERENCES event_seats(id),
+  allocated_at timestamptz NOT NULL DEFAULT now(),
   released_at timestamptz,
   UNIQUE(booking_id, event_seat_id)
 );
 
--- Crucial partial unique index preventing concurrent double bookings while preserving cancellation history:
-CREATE UNIQUE INDEX uq_active_event_seat_booking ON booking_seats(event_seat_id) WHERE released_at IS NULL;
+-- Crucial PostgreSQL partial unique index preventing concurrent double bookings
+CREATE UNIQUE INDEX IF NOT EXISTS uq_active_event_seat_booking 
+ON booking_seats(event_seat_id) 
+WHERE released_at IS NULL;
 
-CREATE TABLE tickets (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  booking_seat_id uuid NOT NULL UNIQUE REFERENCES booking_seats(id) ON DELETE CASCADE,
+CREATE TABLE IF NOT EXISTS tickets (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
+  booking_seat_id varchar(36) NOT NULL UNIQUE REFERENCES booking_seats(id) ON DELETE CASCADE,
   ticket_code varchar(48) NOT NULL UNIQUE,
   issued_at timestamptz NOT NULL DEFAULT now(),
   checked_in_at timestamptz,
   status varchar(20) NOT NULL DEFAULT 'VALID'
 );
-CREATE INDEX ix_tickets_ticket_code ON tickets(ticket_code);
+CREATE INDEX IF NOT EXISTS ix_tickets_ticket_code ON tickets(ticket_code);
 
--- 7. Transactional Outbox for Async Event Notifications
-CREATE TABLE email_outbox (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  recipient varchar(320) NOT NULL,
-  template_type varchar(40) NOT NULL,
-  payload json NOT NULL,
-  status varchar(20) NOT NULL DEFAULT 'PENDING',
-  retry_count integer NOT NULL DEFAULT 0,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  sent_at timestamptz
-);
--- ========================================================
--- 1. Table #9: Booking OTP Verifications
--- ========================================================
+-- 7. OTP Verifications & Cancellations
 CREATE TABLE IF NOT EXISTS booking_otp_verifications (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  booking_id uuid NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
+  booking_id varchar(36) NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
   otp_hash varchar(128) NOT NULL,
   expires_at timestamptz NOT NULL,
   consumed_at timestamptz,
@@ -170,55 +170,71 @@ CREATE TABLE IF NOT EXISTS booking_otp_verifications (
 );
 CREATE INDEX IF NOT EXISTS ix_booking_otp_booking_id ON booking_otp_verifications(booking_id);
 
--- ========================================================
--- 2. Table #10: Cancellations Table (Page 6 of PDF)
--- ========================================================
 CREATE TABLE IF NOT EXISTS cancellations (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  booking_id uuid NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
-  user_id uuid NOT NULL REFERENCES users(id),
-  reason varchar(255) NOT NULL,
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
+  booking_id varchar(36) NOT NULL REFERENCES bookings(id) ON DELETE CASCADE,
+  user_id varchar(36) NOT NULL REFERENCES users(id),
+  reason varchar(255) NOT NULL DEFAULT 'User requested cancellation',
   cancelled_at timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS ix_cancellations_booking_id ON cancellations(booking_id);
 
--- ========================================================
--- 3. Views (Required by Rubric Page 7)
--- ========================================================
+CREATE TABLE IF NOT EXISTS email_outbox (
+  id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
+  recipient varchar(320) NOT NULL,
+  template_type varchar(40) NOT NULL,
+  payload json NOT NULL,
+  status varchar(20) NOT NULL DEFAULT 'PENDING',
+  retry_count integer NOT NULL DEFAULT 0,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  sent_at timestamptz
+);
+
+-- 8. Two Views 
+
 -- View 1: AvailableSeatsView
 CREATE OR REPLACE VIEW AvailableSeatsView AS
 SELECT 
     e.id AS event_id,
     e.title AS event_title,
-    count(es.id) FILTER (WHERE NOT es.is_blocked AND bs.id IS NULL AND (sh.id IS NULL OR sh.status != 'ACTIVE' OR sh.expires_at <= now())) AS available_seats
+    v.name AS venue_name,
+    e.ticket_price,
+    count(es.id) FILTER (
+        WHERE NOT es.is_blocked 
+          AND bs.id IS NULL 
+          AND (sh.id IS NULL OR sh.status != 'ACTIVE' OR sh.expires_at <= now())
+    ) AS available_seats
 FROM events e
+JOIN venues v ON v.id = e.venue_id
 JOIN event_seats es ON es.event_id = e.id
 LEFT JOIN booking_seats bs ON bs.event_seat_id = es.id AND bs.released_at IS NULL
 LEFT JOIN seat_hold_items shi ON shi.event_seat_id = es.id
 LEFT JOIN seat_holds sh ON sh.id = shi.seat_hold_id
-GROUP BY e.id, e.title;
+GROUP BY e.id, e.title, v.name, e.ticket_price;
 
--- View 2: EventBookingSummary
+-- View 2: EventBookingSummary (Includes Revenue Aggregates)
 CREATE OR REPLACE VIEW EventBookingSummary AS
 SELECT 
     e.id AS event_id,
-    e.title,
+    e.title AS event_title,
+    e.start_at,
+    e.ticket_price,
     count(DISTINCT b.id) FILTER (WHERE b.status = 'CONFIRMED') AS confirmed_bookings,
     count(DISTINCT bs.id) FILTER (WHERE bs.released_at IS NULL) AS total_seats_booked,
-    count(DISTINCT c.id) AS total_cancellations
+    count(DISTINCT c.id) AS total_cancellations,
+    coalesce(sum(b.total_amount) FILTER (WHERE b.status = 'CONFIRMED'), 0.00) AS total_revenue
 FROM events e
 LEFT JOIN bookings b ON b.event_id = e.id
 LEFT JOIN booking_seats bs ON bs.booking_id = b.id
 LEFT JOIN cancellations c ON c.booking_id = b.id
-GROUP BY e.id, e.title;
+GROUP BY e.id, e.title, e.start_at, e.ticket_price;
 
--- ========================================================
--- 4. PostgreSQL Triggers (Required by Rubric Page 7)
--- ========================================================
--- Trigger 1: Audit Booking Status Changes
+-- 9. Two Database Triggers 
+
+-- Trigger 1: Audit Booking Status Changes (PENDING -> CONFIRMED -> CANCELLED)
 CREATE TABLE IF NOT EXISTS booking_audit_log (
-    audit_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    booking_id uuid NOT NULL,
+    audit_id varchar(36) PRIMARY KEY DEFAULT gen_random_uuid()::varchar,
+    booking_id varchar(36) NOT NULL,
     old_status varchar(32),
     new_status varchar(32),
     changed_at timestamptz DEFAULT now()
@@ -241,13 +257,13 @@ AFTER UPDATE OF status ON bookings
 FOR EACH ROW
 EXECUTE FUNCTION audit_booking_status_change();
 
--- Trigger 2: Automatically record Cancellation when booking status becomes 'CANCELLED'
+-- Trigger 2: Automatically record Cancellation when Booking status changes to 'CANCELLED'
 CREATE OR REPLACE FUNCTION trg_record_cancellation_func()
 RETURNS TRIGGER AS $$
 BEGIN
     IF NEW.status = 'CANCELLED' AND OLD.status != 'CANCELLED' THEN
-        INSERT INTO cancellations (booking_id, user_id, reason, cancelled_at)
-        VALUES (NEW.id, NEW.user_id, 'Automated trigger cancellation', now())
+        INSERT INTO cancellations (id, booking_id, user_id, reason, cancelled_at)
+        VALUES (gen_random_uuid()::varchar, NEW.id, NEW.user_id, 'Automatic trigger on booking cancellation', now())
         ON CONFLICT DO NOTHING;
     END IF;
     RETURN NEW;
@@ -260,11 +276,12 @@ AFTER UPDATE OF status ON bookings
 FOR EACH ROW
 EXECUTE FUNCTION trg_record_cancellation_func();
 
--- ========================================================
--- 5. Stored Procedures (Required by Rubric Page 7)
--- ========================================================
--- Procedure: CancelBooking
-CREATE OR REPLACE PROCEDURE CancelBooking(p_booking_id uuid, p_user_id uuid, p_reason varchar)
+
+-- 10. Two Stored Procedures 
+
+-- Procedure 1: CancelBookingProcedure
+-- Releases all active seats and sets booking status to CANCELLED
+CREATE OR REPLACE PROCEDURE CancelBookingProcedure(p_booking_id varchar, p_user_id varchar)
 LANGUAGE plpgsql
 AS $$
 BEGIN
@@ -275,8 +292,21 @@ BEGIN
     UPDATE booking_seats
     SET released_at = now()
     WHERE booking_id = p_booking_id AND released_at IS NULL;
+END;
+$$;
 
-    INSERT INTO cancellations (booking_id, user_id, reason, cancelled_at)
-    VALUES (p_booking_id, p_user_id, p_reason, now());
+-- Procedure 2: CancelSingleSeatProcedure
+-- Atomically releases a single seat and invalidates its ticket
+CREATE OR REPLACE PROCEDURE CancelSingleSeatProcedure(p_booking_seat_id varchar)
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    UPDATE booking_seats
+    SET released_at = now()
+    WHERE id = p_booking_seat_id AND released_at IS NULL;
+
+    UPDATE tickets
+    SET status = 'CANCELLED'
+    WHERE booking_seat_id = p_booking_seat_id;
 END;
 $$;

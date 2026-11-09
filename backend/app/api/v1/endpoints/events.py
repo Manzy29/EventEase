@@ -21,7 +21,21 @@ def availability_counts(db: Db, event_id: str) -> dict[str, int]:
 
 def event_data(db: Db, event: Event) -> EventListItem:
     counts = availability_counts(db, event.id)
-    return EventListItem(id=event.id, title=event.title, description=event.description, category=event.category.name, venue=event.venue.name, organizer=event.organizer.full_name, start_at=event.start_at, end_at=event.end_at, available_seats=counts["available"], poster_url=event.poster_url)
+    price = float(getattr(event, "ticket_price", 0.0) or 0.0)
+    return EventListItem(
+        id=event.id,
+        title=event.title,
+        description=event.description,
+        category=event.category.name if event.category else "General",
+        venue=event.venue.name if event.venue else "TBD",
+        organizer=event.organizer.full_name if event.organizer else "Campus Society",
+        ticket_price=price,  # <--- Pass the real price
+        start_at=event.start_at,
+        end_at=event.end_at,
+        available_seats=counts["available"],
+        poster_url=event.poster_url,
+    )
+   
 
 @router.get("", response_model=list[EventListItem])
 def list_events(db: Db, search: str | None = None, category: str | None = None, limit: int = Query(24, le=100)) -> list[EventListItem]:

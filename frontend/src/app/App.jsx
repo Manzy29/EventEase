@@ -9,6 +9,7 @@ import { SeatModal } from '../features/events/SeatModal'
 import { EventDetailsModal } from '../features/events/EventDetailsModal'
 import { MyBookingsView } from '../features/bookings/MyBookingsView'
 import { OrganizersView } from '../features/admin/OrganizersView'
+import { ProfileView } from '../features/profile/ProfileView'
 
 const categories = ['All', 'Technical', 'Cultural', 'Workshop', 'Seminar', 'Hackathon', 'Sports']
 const palette = ['one', 'two', 'three', 'four', 'five', 'six']
@@ -267,6 +268,21 @@ function CampusTix() {
               </main>
             ) : (
               // If not approved/authorized, redirect silently to home
+              <Navigate to="/" replace />
+            )
+          }
+        />
+        <Route
+          path="/profile"
+          element={
+            user ? (
+              <main className="content">
+                <ProfileView
+                  user={user}
+                  onNotify={(msg) => setToast(msg)}
+                />
+              </main>
+            ) : (
               <Navigate to="/" replace />
             )
           }

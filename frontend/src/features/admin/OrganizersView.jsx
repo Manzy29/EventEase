@@ -35,6 +35,7 @@ function CreateEventModal({ onClose, onCreated, onNotify }) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [categoryId, setCategoryId] = useState('')
+  const [ticketPrice, setTicketPrice] = useState('0')
   const [venueId, setVenueId] = useState('')
   const [startAt, setStartAt] = useState('')
   const [endAt, setEndAt] = useState('')
@@ -77,6 +78,7 @@ function CreateEventModal({ onClose, onCreated, onNotify }) {
         venue_id: venueId,
         start_at: new Date(startAt).toISOString(),
         end_at: new Date(endAt).toISOString(),
+        ticket_price: parseFloat(ticketPrice) || 0.0,
       })
       onNotify(`Event "${title}" published successfully!`)
       onCreated()
@@ -121,6 +123,19 @@ function CreateEventModal({ onClose, onCreated, onNotify }) {
             rows="3"
             required
             className="styled-textarea"
+          />
+        </label>
+
+        <label>
+          Ticket Price (₹)
+          <input
+            type="number"
+            min="0"
+            step="10"
+            value={ticketPrice}
+            onChange={(e) => setTicketPrice(e.target.value)}
+            placeholder="0 for free campus entry, or e.g. 50"
+            className="styled-select"
           />
         </label>
 
@@ -623,12 +638,139 @@ function ManageUsersModal({ onClose, onNotify }) {
   )
 }
 
+function ReportsModal({ onClose }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['dbms-reports'],
+    queryFn: organizerApi.getReports,
+  })
+
+  const downloadCSV = (rows, filename) => {
+    if (!rows || !rows.length) {
+      alert("No report data available to export yet.")
+      return
+    }
+    const keys = Object.keys(rows[0])
+    const csvContent =
+      'data:text/csv;charset=utf-8,' +
+      [
+        keys.join(','),
+        ...rows.map((r) => keys.map((k) => `"${r[k] !== undefined && r[k] !== null ? r[k] : ''}"`).join(',')),
+      ].join('\n')
+
+    const link = document.createElement('a')
+    link.setAttribute('href', encodeURI(csvContent))
+    link.setAttribute('download', filename)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Analytics & Reports">
+      <div className="modal attendees-modal" style={{ maxWidth: '880px' }}>
+        <div className="modal-head">
+          <div>
+            <h2>Analytics & Reports</h2>
+            <div className="muted">Live data aggregation from PostgreSQL Views and Triggers</div>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Close">
+            <X />
+          </button>
+        </div>
+
+        <div className="attendees-body">
+          {isLoading ? (
+            <p className="muted loading">Generating analytical reports from database…</p>
+          ) : (
+            <div style={{ display: 'grid', gap: '28px' }}>
+              {/* Report 1 */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <h4 style={{ margin: 0, color: '#172233' }}>Report 1: Event Occupancy & Revenue Summary (View)</h4>
+                  <button
+                    className="secondary-btn"
+                    style={{ fontSize: '0.78rem', padding: '4px 10px' }}
+                    onClick={() => downloadCSV(data?.occupancy_report, 'Event_Occupancy_Report.csv')}
+                  >
+                    Export CSV
+                  </button>
+                </div>
+                <div className="table-responsive">
+                  <table className="attendee-table">
+                    <thead>
+                      <tr>
+                        <th>Event</th>
+                        <th>Bookings</th>
+                        <th>Seats Sold</th>
+                        <th>Cancellations</th>
+                        <th>Revenue (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data?.occupancy_report?.map((r, i) => (
+                        <tr key={i}>
+                          <td><strong>{r.event_title}</strong></td>
+                          <td>{r.confirmed_bookings}</td>
+                          <td>{r.total_seats_booked}</td>
+                          <td>{r.total_cancellations}</td>
+                          <td style={{ color: '#16794c', fontWeight: 700 }}>₹{r.total_revenue}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Report 2 */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <h4 style={{ margin: 0, color: '#172233' }}>Report 2: Venue Infrastructure & Capacity Utilization</h4>
+                  <button
+                    className="secondary-btn"
+                    style={{ fontSize: '0.78rem', padding: '4px 10px' }}
+                    onClick={() => downloadCSV(data?.venue_report, 'Venue_Capacity_Report.csv')}
+                  >
+                    Export CSV
+                  </button>
+                </div>
+                <div className="table-responsive">
+                  <table className="attendee-table">
+                    <thead>
+                      <tr>
+                        <th>Venue</th>
+                        <th>Location</th>
+                        <th>Physical Capacity</th>
+                        <th>Events Scheduled</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data?.venue_report?.map((r, i) => (
+                        <tr key={i}>
+                          <td><strong>{r.venue_name}</strong></td>
+                          <td>{r.location}</td>
+                          <td>{r.total_capacity} seats</td>
+                          <td>{r.hosted_events}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedEventForAttendees, setSelectedEventForAttendees] = useState(null)
   const [selectedEventForBlocking, setSelectedEventForBlocking] = useState(null)
   const [seeding, setSeeding] = useState(false)
   const [showManageUsersModal, setShowManageUsersModal] = useState(false)
+  const [showReportsModal, setShowReportsModal] = useState(false)
   const queryClient = useQueryClient()
 
   const isOrganizer = user && (user.role === 'ORGANIZER' || user.role === 'ADMIN')
@@ -735,6 +877,18 @@ if (!isOrganizer) {
   return (
     <div className="organizer-page">
       <div className="section-top">
+        {/* Left: Title & Subtitle */}
+        <div>
+          <div className="eyebrow" style={{ color: '#5b4ce2' }}>
+            {user.role === 'ADMIN' ? 'Administrator' : 'Organizer'} Portal
+          </div>
+          <h2 className="section-title">Organizer Dashboard</h2>
+          <p className="section-copy">
+            Welcome back, {user.full_name}. Oversee your scheduled events and seating allocations.
+          </p>
+        </div>
+
+        {/* Right: Action Buttons */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           {user.role === 'ADMIN' && (
             <button
@@ -746,6 +900,16 @@ if (!isOrganizer) {
               Appoint Organizers
             </button>
           )}
+
+          <button
+            className="secondary-btn"
+            onClick={() => setShowReportsModal(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <Layers size={15} />
+            Analytics & Reports
+          </button>
+
           <button
             className="secondary-btn"
             onClick={() => handleSeedDemoData(true)}
@@ -755,19 +919,11 @@ if (!isOrganizer) {
             <Sparkles size={15} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '6px' }} />
             {seeding ? 'Seeding…' : 'Re-Seed Demo Data'}
           </button>
+
           <button className="primary" onClick={() => setShowCreateModal(true)}>
             <Plus size={16} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '6px' }} />
             Create New Event
           </button>
-        </div>
-        <div>
-          <div className="eyebrow" style={{ color: '#5b4ce2' }}>
-            {user.role === 'ADMIN' ? 'Administrator' : 'Organizer'} Portal
-          </div>
-          <h2 className="section-title">Organizer Dashboard</h2>
-          <p className="section-copy">
-            Welcome back, {user.full_name}. Oversee your scheduled events and seating allocations.
-          </p>
         </div>
       </div>
 
@@ -907,6 +1063,8 @@ if (!isOrganizer) {
           onNotify={onNotify}
         />
       )}
+      
+      {showReportsModal && <ReportsModal onClose={() => setShowReportsModal(false)} />}
 
       {showManageUsersModal && (
         <ManageUsersModal

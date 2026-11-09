@@ -22,6 +22,7 @@ export const authApi = {
   register: (full_name, email, password) => api.post('/auth/register', { full_name, email, password }).then(({ data }) => data),
   verifyEmail: (email, code) => api.post('/auth/verify-email', { email, code }).then(({ data }) => data),
   logout: () => api.post('/auth/logout'),
+  updateProfile: (data) => api.put('/auth/profile', data).then(({ data }) => data),
 }
 
 export const bookingApi = {
@@ -48,6 +49,7 @@ export const organizerApi = {
       event_seat_ids: eventSeatIds,
       is_blocked: isBlocked,
     }).then(({ data }) => data),
+  getReports: () => api.get('/organizer/reports/summary').then(({ data }) => data),
 }
 
 export const systemApi = {

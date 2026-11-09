@@ -51,7 +51,13 @@ class EventListItem(BaseModel):
     category: str
     venue: str
     organizer: str
+    ticket_price: float = 0.0
     start_at: datetime
     end_at: datetime
     available_seats: int
     poster_url: str | None
+
+class UpdateProfileRequest(BaseModel):
+    full_name: str | None = Field(default=None, min_length=2, max_length=120)
+    current_password: str | None = Field(default=None)
+    new_password: str | None = Field(default=None, min_length=10, max_length=128)

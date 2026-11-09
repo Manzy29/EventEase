@@ -299,64 +299,83 @@ export function SeatModal({ event, user, onClose, onSignIn, onViewBookings }) {
 
             <hr className="summary-rule" />
 
-            <p className="muted">
-              <strong>{selected.length} ticket{selected.length === 1 ? '' : 's'}</strong>
-              <br />
-              Free campus event
-            </p>
+            {/* Clean, Non-Duplicated Dynamic Pricing Calculation */}
+            {(() => {
+              const unitPrice = parseFloat(event.ticket_price) || 0
+              const totalAmount = selected.length * unitPrice
 
-            {confirmedBooking ? (
-              <button
-                className="secondary-btn full"
-                onClick={() => {
-                  onClose()
-                  onViewBookings()
-                }}
-              >
-                View in My Bookings
-              </button>
-            ) : pendingBooking ? (
-              <div style={{ display: 'grid', gap: '8px', marginTop: '12px' }}>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#3e4a5d' }}>
-                  Enter 6-digit OTP sent to {user?.email}:
-                  <input
-                    type="text"
-                    value={otp}
-                    onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                    pattern="\d{6}"
-                    maxLength={6}
-                    placeholder="123456"
-                    style={{
-                      width: '100%',
-                      padding: '8px',
-                      textAlign: 'center',
-                      letterSpacing: '4px',
-                      fontWeight: 700,
-                      border: '1px solid #dde2ea',
-                      borderRadius: '8px',
-                      marginTop: '4px',
-                    }}
-                    autoFocus
-                  />
-                </label>
-                <button
-                  className="primary full"
-                  disabled={otp.length !== 6 || verifying}
-                  onClick={confirmOtp}
-                >
-                  {verifying ? 'Verifying OTP…' : 'Verify & Confirm Booking'}
-                </button>
-              </div>
-            ) : (
-              <button
-                className="primary full"
-                disabled={!selected.length || query.isLoading || query.isError}
-                onClick={initiateReservation}
-              >
-                {user ? 'Reserve free tickets' : 'Log in to reserve'}
-              </button>
-            )}
+              return (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', margin: '14px 0' }}>
+                    <div>
+                      <strong>{selected.length} ticket{selected.length === 1 ? '' : 's'}</strong>
+                      <div className="muted" style={{ fontSize: '0.78rem' }}>
+                        {unitPrice > 0 ? `₹${unitPrice} per seat` : 'Free entry'}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 800, color: unitPrice > 0 ? '#16794c' : '#5b4ce2' }}>
+                      {unitPrice > 0 ? `₹${totalAmount}` : 'FREE'}
+                    </div>
+                  </div>
 
+                  {confirmedBooking ? (
+                    <button
+                      className="secondary-btn full"
+                      onClick={() => {
+                        onClose()
+                        onViewBookings()
+                      }}
+                    >
+                      View in My Bookings
+                    </button>
+                  ) : pendingBooking ? (
+                    <div style={{ display: 'grid', gap: '8px', marginTop: '12px' }}>
+                      <label style={{ fontSize: '0.8rem', fontWeight: 600, color: '#3e4a5d' }}>
+                        Enter 6-digit OTP sent to {user?.email}:
+                        <input
+                          type="text"
+                          value={otp}
+                          onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                          pattern="\d{6}"
+                          maxLength={6}
+                          placeholder="123456"
+                          style={{
+                            width: '100%',
+                            padding: '8px',
+                            textAlign: 'center',
+                            letterSpacing: '4px',
+                            fontWeight: 700,
+                            border: '1.5px solid #5b4ce2',
+                            borderRadius: '8px',
+                            marginTop: '4px',
+                          }}
+                          autoFocus
+                        />
+                      </label>
+                      <button
+                        className="primary full"
+                        disabled={otp.length !== 6 || verifying}
+                        onClick={confirmOtp}
+                      >
+                        {verifying ? 'Verifying OTP…' : 'Verify & Confirm Booking'}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      className="primary full"
+                      disabled={!selected.length || query.isLoading || query.isError}
+                      onClick={initiateReservation}
+                    >
+                      {user
+                        ? unitPrice > 0
+                          ? `Reserve ${selected.length || ''} Seats (₹${totalAmount})`
+                          : 'Reserve free tickets'
+                        : 'Log in to reserve'}
+                    </button>
+                  )}
+                </>
+              )
+            })()}
             <p className="notice">Seat availability is rechecked on the server before confirmation.</p>
           </aside>
         </div>

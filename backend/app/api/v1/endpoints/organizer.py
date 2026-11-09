@@ -3,7 +3,7 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import joinedload
 
 from app.api.v1.deps import Db, admin_user, current_user, organizer_user
@@ -21,6 +21,7 @@ class CreateEventPayload(BaseModel):
     description: str = Field(min_length=5)
     category_id: str
     venue_id: str
+    ticket_price: float = Field(default=0.0, ge=0.0)  # Price in INR
     start_at: datetime
     end_at: datetime
     cancellation_deadline: datetime | None = None
@@ -74,12 +75,27 @@ def list_organizer_events(db: Db, user: User = Depends(organizer_user)) -> list[
                 print(f"[ERROR] booking count failed for event {ev.id}: {e}")
                 booking_count = 0
 
+            revenue = 0.0
+            try:
+                if hasattr(Booking, "total_amount"):
+                    rev_result = db.scalar(
+                        select(func.sum(Booking.total_amount))
+                        .where(Booking.event_id == ev.id, Booking.status == BookingStatus.CONFIRMED)
+                    )
+                    revenue = float(rev_result) if rev_result is not None else 0.0
+            except Exception:
+                revenue = 0.0
+
+            ticket_price = getattr(ev, "ticket_price", 0.0) or 0.0
+
             result.append({
                 "id": ev.id,
                 "title": ev.title,
                 "description": ev.description,
                 "category": ev.category.name if ev.category else "General",
                 "venue": ev.venue.name if ev.venue else "TBD",
+                "ticket_price": float(ticket_price),
+                "total_revenue": float(revenue),
                 "start_at": ev.start_at,
                 "end_at": ev.end_at,
                 "status": ev.status,
@@ -159,6 +175,7 @@ def create_event(payload: CreateEventPayload, db: Db, user: User = Depends(organ
         category_id=category.id,
         venue_id=venue.id,
         organizer_id=user.id,
+        ticket_price=payload.ticket_price,
         start_at=payload.start_at,
         end_at=payload.end_at,
         registration_opens_at=datetime.now(UTC),
@@ -381,4 +398,58 @@ def update_user_role(
         "message": f"Successfully updated {target_user.full_name}'s role to {payload.role.value}.",
         "user_id": target_user.id,
         "role": target_user.role.value,
+    }
+
+@router.get("/reports/summary")
+def get_reports_summary(db: Db, user: User = Depends(organizer_user)) -> dict:
+    """Slide 2 Requirement: Generates 2 database analytical reports."""
+    # Report 1: Event Occupancy & Revenue Summary (Queries View with fallback)
+    try:
+        occupancy_data = db.execute(
+            text("SELECT event_title, confirmed_bookings, total_seats_booked, total_cancellations, total_revenue FROM EventBookingSummary")
+        ).mappings().all()
+    except Exception:
+        db.rollback()
+        # Direct SQL fallback if the view is not yet compiled in PostgreSQL
+        occupancy_data = db.execute(
+            text("""
+                SELECT 
+                    e.title AS event_title,
+                    count(DISTINCT b.id) FILTER (WHERE b.status = 'CONFIRMED') AS confirmed_bookings,
+                    count(DISTINCT bs.id) FILTER (WHERE bs.released_at IS NULL) AS total_seats_booked,
+                    count(DISTINCT c.id) AS total_cancellations,
+                    coalesce(sum(b.total_amount) FILTER (WHERE b.status = 'CONFIRMED'), 0.00) AS total_revenue
+                FROM events e
+                LEFT JOIN bookings b ON b.event_id = e.id
+                LEFT JOIN booking_seats bs ON bs.booking_id = b.id
+                LEFT JOIN cancellations c ON c.booking_id = b.id
+                GROUP BY e.id, e.title
+                ORDER BY total_revenue DESC
+            """)
+        ).mappings().all()
+
+    # Report 2: Venue Infrastructure & Capacity Utilization
+    try:
+        venue_data = db.execute(
+            text("""
+                SELECT 
+                    v.name AS venue_name, 
+                    coalesce(v.location, 'Campus') AS location, 
+                    count(DISTINCT vs.id) AS total_capacity, 
+                    count(DISTINCT e.id) AS hosted_events
+                FROM venues v
+                LEFT JOIN venue_rows vr ON vr.venue_id = v.id
+                LEFT JOIN venue_seats vs ON vs.venue_row_id = vr.id
+                LEFT JOIN events e ON e.venue_id = v.id
+                GROUP BY v.id, v.name, v.location
+                ORDER BY total_capacity DESC
+            """)
+        ).mappings().all()
+    except Exception as exc:
+        print(f"[REPORT 2 ERROR]: {exc}")
+        venue_data = []
+
+    return {
+        "occupancy_report": [dict(r) for r in occupancy_data],
+        "venue_report": [dict(r) for r in venue_data],
     }

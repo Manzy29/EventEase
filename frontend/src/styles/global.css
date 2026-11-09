@@ -327,3 +327,257 @@ button { cursor: pointer; }
   background: #fee2e2;
   color: #ef4444;
 }
+
+/* ========================================================
+   Personal Details & Profile Page Styling
+   ======================================================== */
+.profile-page {
+  width: 100%;
+}
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 24px;
+}
+
+.profile-card {
+  background: #ffffff;
+  border: 1px solid #e8ebf0;
+  border-radius: 14px;
+  padding: 24px;
+  box-shadow: 0 4px 12px rgba(26, 33, 64, 0.04);
+}
+
+.profile-summary-card {
+  text-align: center;
+  height: fit-content;
+}
+
+.profile-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: #f0efff;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 16px;
+}
+
+.profile-badge-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border-top: 1px solid #edf0f5;
+  padding-top: 16px;
+  text-align: left;
+}
+
+.profile-badge-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.84rem;
+  color: #556176;
+}
+
+.profile-forms {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.profile-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid #f0f2f7;
+  padding-bottom: 12px;
+}
+
+.profile-card-header h4 {
+  margin: 0;
+  font-size: 1.05rem;
+  color: #172233;
+}
+
+.profile-label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.84rem;
+  font-weight: 700;
+  color: #3e4a5d;
+  margin-bottom: 16px;
+}
+
+.profile-input {
+  border: 1px solid #dde2ea;
+  border-radius: 9px;
+  padding: 10px 14px;
+  font: inherit;
+  font-weight: 400;
+}
+
+.profile-input.disabled {
+  background: #f8f9fc;
+  color: #7b8494;
+  cursor: not-allowed;
+}
+
+@media (max-width: 800px) {
+  .profile-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ========================================================
+   User Profile Dropdown Overlay
+   ======================================================== */
+.user-menu-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
+/* User Greeting Chip */
+.user-profile-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f8f9fd;
+  border: 1px solid #e2e8f0;
+  border-radius: 100px;
+  padding: 4px 12px 4px 6px;
+  cursor: pointer;
+  transition: all 0.18s ease;
+  font: inherit;
+}
+
+.user-profile-chip:hover,
+.user-profile-chip.active {
+  background: #f1f3fd;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 8px rgba(91, 76, 226, 0.08);
+}
+
+.user-avatar-circle {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: #eeecfd;
+  color: #5b4ce2;
+  display: grid;
+  place-items: center;
+}
+
+.signed-in-name {
+  color: #334155;
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.chip-chevron {
+  color: #64748b;
+  transition: transform 0.2s ease;
+}
+
+.chip-chevron.open {
+  transform: rotate(180deg);
+}
+
+/* Overlay Popover */
+.user-profile-overlay {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 240px;
+  background: #ffffff;
+  border: 1px solid #e9ecf2;
+  border-radius: 14px;
+  padding: 8px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+  z-index: 100;
+  animation: overlayFadeIn 0.15s ease-out;
+}
+
+@keyframes overlayFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.overlay-user-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+}
+
+.overlay-name {
+  color: #0f172a;
+  font-size: 0.94rem;
+  font-weight: 700;
+}
+
+.overlay-email {
+  color: #64748b;
+  font-size: 0.78rem;
+}
+
+.overlay-role-tag {
+  display: inline-block;
+  width: fit-content;
+  background: #f0efff;
+  color: #5b4ce2;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 4px;
+  margin-top: 6px;
+  letter-spacing: 0.04em;
+}
+
+.overlay-divider {
+  border: 0;
+  border-top: 1px solid #f1f5f9;
+  margin: 6px 0;
+}
+
+/* Menu Items inside Overlay */
+.overlay-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  color: #334155;
+  font-size: 0.88rem;
+  font-weight: 500;
+  text-decoration: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  box-sizing: border-box;
+}
+
+.overlay-menu-item:hover {
+  background: #f4f3ff;
+  color: #5b4ce2;
+}
+
+.overlay-logout-btn {
+  color: #dc2626;
+}
+
+.overlay-logout-btn:hover {
+  background: #fef2f2;
+  color: #b91c1c;
+}

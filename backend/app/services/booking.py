@@ -184,6 +184,11 @@ def verify_booking_otp_and_confirm(
             raise HTTPException(status_code=409, detail="A selected seat is no longer available.")
 
         otp_record.consumed_at = now()
+
+        event = db.get(Event, booking.event_id)
+        unit_price = float(event.ticket_price) if event and event.ticket_price else 0.0
+        booking.total_amount = float(len(seat_ids) * unit_price)
+        
         booking.status = BookingStatus.CONFIRMED
         booking.confirmed_at = now()
 
