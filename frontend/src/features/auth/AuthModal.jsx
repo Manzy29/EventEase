@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { X } from 'lucide-react'
+import { Eye, EyeOff, X } from 'lucide-react'
 import { authApi } from '../../services/api'
 
 function errorMessage(error, fallback) {
@@ -13,6 +13,7 @@ export function AuthModal({ initialMode = 'login', initialEmail = '', onClose, o
   const [password, setPassword] = useState('')
   const [code, setCode] = useState('')
   const [message, setMessage] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
   const [isSuccess, setIsSuccess] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
@@ -30,6 +31,7 @@ export function AuthModal({ initialMode = 'login', initialEmail = '', onClose, o
         const result = await authApi.register(name, email, password)
         setIsSuccess(true)
         setMessage(`${result.message} Enter your 6-digit code below:`)
+        setShowPassword(false)
         setMode('verify')
       } else if (mode === 'verify') {
         const result = await authApi.verifyEmail(email, code)
@@ -37,6 +39,7 @@ export function AuthModal({ initialMode = 'login', initialEmail = '', onClose, o
         setMessage(`${result.message} Redirecting to login…`)
         setTimeout(() => {
           setMode('login')
+          setShowPassword(false)
           setMessage('Email verified! Please enter your password to sign in.')
         }, 1500)
       }
@@ -76,14 +79,25 @@ export function AuthModal({ initialMode = 'login', initialEmail = '', onClose, o
         {mode !== 'verify' && (
           <label>
             Password
-            <input
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              minLength={mode === 'register' ? 10 : 1}
-              required
-              autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-            />
+            <div className="password-input-wrapper">
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                minLength={mode === 'register' ? 10 : 1}
+                required
+                autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+              />
+              <button
+                type="button"
+                className="password-toggle-btn"
+                onClick={() => setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                title={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+              </button>
+            </div>
           </label>
         )}
         {mode === 'verify' && (
@@ -119,6 +133,7 @@ export function AuthModal({ initialMode = 'login', initialEmail = '', onClose, o
                 onClick={() => {
                   setMode('register')
                   setMessage('')
+                  setShowPassword(false)
                 }}
               >
                 Need an account? Create one
@@ -129,6 +144,7 @@ export function AuthModal({ initialMode = 'login', initialEmail = '', onClose, o
                 onClick={() => {
                   setMode('verify')
                   setMessage('')
+                  setShowPassword(false)
                 }}
               >
                 Have a code to verify? Verify email
@@ -142,6 +158,7 @@ export function AuthModal({ initialMode = 'login', initialEmail = '', onClose, o
               onClick={() => {
                 setMode('login')
                 setMessage('')
+                setShowPassword(false)
               }}
             >
               Already have an account? Log in
@@ -154,6 +171,7 @@ export function AuthModal({ initialMode = 'login', initialEmail = '', onClose, o
               onClick={() => {
                 setMode('login')
                 setMessage('')
+                setShowPassword(false)
               }}
             >
               Back to Log in
