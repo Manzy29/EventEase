@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { X, Clock } from 'lucide-react'
+import { X, Clock, Eye, ArrowLeft } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { eventApi } from '../../services/api'
+import { getSeatPerspective } from './seatPerspective'
 
 const noSeats = []
 
@@ -15,6 +16,10 @@ export function SeatModal({ event, user, onClose, onSignIn, onViewBookings }) {
   const [confirmedBooking, setConfirmedBooking] = useState(null)
   const [activeHold, setActiveHold] = useState(null)
   const [secondsRemaining, setSecondsRemaining] = useState(0)
+
+  // First-Person POV state
+  const [previewSeat, setPreviewSeat] = useState(null)
+  const perspective = previewSeat ? getSeatPerspective(previewSeat) : null
 
   // OTP Verification state
   const [pendingBooking, setPendingBooking] = useState(null)
@@ -31,42 +36,41 @@ export function SeatModal({ event, user, onClose, onSignIn, onViewBookings }) {
   })
 
   const seats = query.data ?? noSeats
+
   // Check for any active pending reservation for this user and event
   useEffect(() => {
     if (!user || confirmedBooking) return
     let isMounted = true
 
     eventApi
-      .getPending(event.id)
-      .then((res) => {
+      .getPending?.(event.id)
+      ?.then((res) => {
         if (!isMounted || !res || !res.has_pending) return
 
-        // Auto-select the seats held by this user
         setSelected(res.seat_ids || [])
         setActiveHold({ id: res.hold_id, expires_at: res.expires_at })
         setPendingBooking({ id: res.booking_id, reference: res.reference })
 
-        // Restore countdown timer
         const expiresAt = new Date(res.expires_at).getTime()
         const diffSecs = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000))
         setSecondsRemaining(diffSecs)
 
         setMessage('Active reservation found! Enter the OTP sent to your email to complete verification.')
       })
-      .catch(() => {})
+      ?.catch(() => {})
 
     return () => {
       isMounted = false
     }
   }, [event.id, user, confirmedBooking])
 
- const rows = useMemo(() => {
+  // Sort rows strictly alphabetically (A -> B -> C -> D -> E -> F -> G)
+  const rows = useMemo(() => {
     const map = seats.reduce((acc, seat) => {
       (acc[seat.row] ||= []).push(seat)
       return acc
     }, {})
 
-    // Sort rows strictly alphabetically (A -> B -> C -> D -> E -> F -> G)
     const sortedRowKeys = Object.keys(map).sort((a, b) => a.localeCompare(b))
 
     return sortedRowKeys.map((r) => {
@@ -93,11 +97,18 @@ export function SeatModal({ event, user, onClose, onSignIn, onViewBookings }) {
     return () => clearInterval(interval)
   }, [activeHold, secondsRemaining, event.id, queryClient])
 
+  // Click seat: selects the seat and immediately spawns the POV preview!
   const toggle = (seat) => {
     if (seat.status !== 'AVAILABLE') return
-    setSelected((old) =>
-      old.includes(seat.id) ? old.filter((id) => id !== seat.id) : old.length === 5 ? old : [...old, seat.id]
-    )
+
+    setSelected((old) => {
+      if (old.includes(seat.id)) return old
+      if (old.length >= 5) return old
+      return [...old, seat.id]
+    })
+
+    // Immediately trigger the First-Person POV View!
+    setPreviewSeat(seat)
   }
 
   const formatTimer = (sec) => {
@@ -137,7 +148,7 @@ export function SeatModal({ event, user, onClose, onSignIn, onViewBookings }) {
     if (!pendingBooking || !activeHold || otp.length !== 6) return
     setVerifying(true)
     try {
-      const confirmed = await eventApi.verifyBookingOtp(pendingBooking.id, activeHold.id || null , otp)
+      const confirmed = await eventApi.verifyBookingOtp(pendingBooking.id, otp, activeHold.id || null)
       setMessage(`Booking confirmed: ${confirmed.reference}`)
       setConfirmedBooking(confirmed)
       setPendingBooking(null)
@@ -202,14 +213,15 @@ export function SeatModal({ event, user, onClose, onSignIn, onViewBookings }) {
                       {/* Left Row Identifier */}
                       <span className="row-name">{rowLabel}</span>
 
-                      {/* Left Block */}
+                      {/* Left Wing */}
                       <div className="seat-wing left-wing">
                         {leftSeats.map((seat) => (
                           <button
                             key={seat.id}
+                            type="button"
                             onClick={() => toggle(seat)}
                             className={`seat ${selected.includes(seat.id) ? 'selected' : seat.status.toLowerCase()}`}
-                            title={`${seat.label} (${seat.status})`}
+                            title={`Click to preview POV & select seat ${seat.label}`}
                           >
                             {seat.label.replace(/^[A-Z]-?/, '')}
                           </button>
@@ -222,14 +234,15 @@ export function SeatModal({ event, user, onClose, onSignIn, onViewBookings }) {
                         <span className="aisle-step" />
                       </div>
 
-                      {/* Right Block */}
+                      {/* Right Wing */}
                       <div className="seat-wing right-wing">
                         {rightSeats.map((seat) => (
                           <button
                             key={seat.id}
+                            type="button"
                             onClick={() => toggle(seat)}
                             className={`seat ${selected.includes(seat.id) ? 'selected' : seat.status.toLowerCase()}`}
-                            title={`${seat.label} (${seat.status})`}
+                            title={`Click to preview POV & select seat ${seat.label}`}
                           >
                             {seat.label.replace(/^[A-Z]-?/, '')}
                           </button>
@@ -244,27 +257,19 @@ export function SeatModal({ event, user, onClose, onSignIn, onViewBookings }) {
               </div>
             )}
 
-            {/* Original Legend */}
+            {/* Legend */}
             <div className="legend">
-              <span>
-                <i className="dot" style={{ background: '#e7eefc' }} /> Available
-              </span>
-              <span>
-                <i className="dot" style={{ background: '#5b4ce2' }} /> Selected
-              </span>
-              <span>
-                <i className="dot" style={{ background: '#fae4be' }} /> Held
-              </span>
-              <span>
-                <i className="dot" style={{ background: '#d9dde4' }} /> Booked
-              </span>
+              <span><i className="dot" style={{ background: '#e7eefc' }} /> Available</span>
+              <span><i className="dot" style={{ background: '#5b4ce2' }} /> Selected</span>
+              <span><i className="dot" style={{ background: '#fae4be' }} /> Held</span>
+              <span><i className="dot" style={{ background: '#d9dde4' }} /> Booked</span>
             </div>
           </div>
 
-          {/* Right Summary & OTP Confirmation Sidebar */}
+          {/* Right Summary Sidebar */}
           <aside className="booking-summary">
             <h3>Your selection</h3>
-            <p className="muted">Choose up to 5 seats. Held seats refresh automatically.</p>
+            <p className="muted">Choose up to 5 seats. Click any seat to preview its POV.</p>
 
             {activeHold && secondsRemaining > 0 && (
               <div
@@ -287,19 +292,43 @@ export function SeatModal({ event, user, onClose, onSignIn, onViewBookings }) {
 
             <div className="seat-tags">
               {selected.length ? (
-                selected.map((id) => (
-                  <span className="seat-tag" key={id}>
-                    {seats.find((s) => s.id === id)?.label}
-                  </span>
-                ))
+                selected.map((id) => {
+                  const s = seats.find((item) => item.id === id)
+                  return (
+                    <span
+                      className="seat-tag"
+                      key={id}
+                      onClick={() => setPreviewSeat(s)}
+                      style={{ cursor: 'pointer' }}
+                      title="Click to view POV"
+                    >
+                      {s?.label}
+                    </span>
+                  )
+                })
               ) : (
                 <span className="muted">No seats selected</span>
               )}
             </div>
 
+            {/* Quick Preview Button for Selected Seat */}
+            {selected.length > 0 && (
+              <button
+                type="button"
+                className="secondary-btn full"
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', margin: '8px 0' }}
+                onClick={() => {
+                  const lastSelected = seats.find((s) => s.id === selected[selected.length - 1])
+                  setPreviewSeat(lastSelected)
+                }}
+              >
+                <Eye size={16} /> View Perspective ({seats.find((s) => s.id === selected[selected.length - 1])?.label})
+              </button>
+            )}
+
             <hr className="summary-rule" />
 
-            {/* Clean, Non-Duplicated Dynamic Pricing Calculation */}
+            {/* Dynamic Pricing Calculation */}
             {(() => {
               const unitPrice = parseFloat(event.ticket_price) || 0
               const totalAmount = selected.length * unitPrice
@@ -376,10 +405,110 @@ export function SeatModal({ event, user, onClose, onSignIn, onViewBookings }) {
                 </>
               )
             })()}
-            <p className="notice">Seat availability is rechecked on the server before confirmation.</p>
+
+            <p className="notice">Physical seats are row-locked in PostgreSQL with ACID isolation.</p>
           </aside>
         </div>
+
+        {/* First-Person POV Overlay (Spans over the ENTIRE modal, matching the reference video) */}
+        {perspective && (
+          <div className="seat-pov-overlay" role="dialog" aria-modal="true">
+            {/* Top Bar */}
+            <div className="seat-pov-header">
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => setPreviewSeat(null)}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <ArrowLeft size={16} /> Back to Seating Map
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className="pov-badge">{perspective.perspectiveType}</span>
+                <span className="pov-seat-tag">Row {perspective.row} · {perspective.label}</span>
+              </div>
+            </div>
+
+            {/* 16:9 Viewport (Camera Zoom & Pan toward Screens) */}
+            <div className="seat-pov-viewport">
+              <img
+                src="/auditorium/is_seminar_hall_master.jpg"
+                alt={`View from ${perspective.label}`}
+                className="seat-pov-master-img"
+                style={perspective.transformStyle}
+                onError={(e) => {
+                  e.target.style.display = 'none'
+                  if (e.target.nextSibling) {
+                    e.target.nextSibling.style.display = 'flex'
+                  }
+                }}
+              />
+
+              {/* Fallback stage canvas if photo is missing */}
+              <div className="seat-pov-fallback-canvas" style={{ display: 'none', ...perspective.transformStyle }}>
+                <div className="fallback-screen">SCREEN 1 (S1)</div>
+                <div className="fallback-podium">STAGE / PODIUM</div>
+                <div className="fallback-screen">SCREEN 2 (S2)</div>
+              </div>
+
+              {/* Target indicator tag */}
+              <div className="seat-pov-screen-marker">
+                Facing {perspective.primaryScreen}
+              </div>
+
+              {/* Foreground red chairs for middle & back rows */}
+              {perspective.hasObstruction && (
+                <div className="seat-pov-chair-foreground">
+                  <div className="foreground-chair-back" />
+                  <div className="foreground-chair-back" />
+                </div>
+              )}
+            </div>
+
+            {/* Bottom Telemetry Bar & Action Buttons (Matching Video) */}
+            <div className="seat-pov-bottom-card">
+              <div className="seat-pov-telemetry">
+                <div className="telemetry-item">
+                  <span className="telemetry-val">{perspective.distance}</span>
+                  <span className="telemetry-lbl">to Screen</span>
+                </div>
+                <div className="telemetry-item">
+                  <span className="telemetry-val">{perspective.fov}</span>
+                  <span className="telemetry-lbl">field of view</span>
+                </div>
+                <div className="telemetry-item">
+                  <span className="telemetry-val">{perspective.lateralOffset}</span>
+                  <span className="telemetry-lbl">aisle offset</span>
+                </div>
+              </div>
+
+              <div className="seat-pov-actions">
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  style={{ flex: 1 }}
+                  onClick={() => {
+                    setSelected((old) => old.filter((id) => id !== previewSeat.id))
+                    setPreviewSeat(null)
+                  }}
+                >
+                  Change seat
+                </button>
+
+                <button
+                  type="button"
+                  className="primary"
+                  style={{ flex: 2 }}
+                  onClick={() => setPreviewSeat(null)}
+                >
+                  Confirm Seat {perspective.label} & Continue
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
+
       {message && <div className="toast">{message}</div>}
     </div>
   )

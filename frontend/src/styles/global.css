@@ -128,9 +128,11 @@ button { cursor: pointer; }
 
 /* 1. Expand the modal dialog to comfortably use the screen */
 .seminar-modal {
+  position: relative !important; /* CRITICAL: Anchors the POV overlay inside this dialog */
   max-width: 1420px;
   width: 96vw;
   max-height: 94vh;
+  overflow: hidden;
 }
 
 .seminar-layout {
@@ -580,4 +582,179 @@ button { cursor: pointer; }
 .overlay-logout-btn:hover {
   background: #fef2f2;
   color: #b91c1c;
+}
+/* ========================================================
+   First-Person POV Camera View (From Master Hall Photo)
+   ======================================================== */
+.seat-pov-overlay {
+  position: absolute;
+  inset: 0;
+  background: #0b1120;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  padding: 18px;
+  animation: povFadeIn 0.25s ease-out;
+  border-radius: 16px;
+}
+
+@keyframes povFadeIn {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.seat-pov-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.pov-seat-tag {
+  color: #ffffff;
+  font-weight: 800;
+  font-size: 0.95rem;
+}
+
+.pov-badge {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  padding: 3px 8px;
+  border-radius: 5px;
+}
+
+/* 16:9 Cinema Viewport */
+.seat-pov-viewport {
+  position: relative;
+  flex: 1;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #000000;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.seat-pov-master-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  user-select: none;
+}
+
+.seat-pov-screen-marker {
+  position: absolute;
+  top: 14px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(8px);
+  color: #f8fafc;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 5px 14px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+
+/* Foreground Red Chair Tops (Replicating the video clip) */
+.seat-pov-chair-foreground {
+  position: absolute;
+  bottom: -15px;
+  left: 0;
+  right: 0;
+  height: 65px;
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  pointer-events: none;
+}
+
+.foreground-chair-back {
+  width: 140px;
+  height: 60px;
+  background: linear-gradient(180deg, #991b1b 0%, #450a0a 100%);
+  border-radius: 20px 20px 0 0;
+  box-shadow: 0 -4px 14px rgba(0,0,0,0.6);
+  opacity: 0.92;
+  border-top: 2px solid #b91c1c;
+}
+
+/* Telemetry Card matching the video */
+.seat-pov-telemetry {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  background: #1e293b;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 12px;
+}
+
+.telemetry-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+}
+
+.telemetry-val {
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.telemetry-lbl {
+  font-size: 0.72rem;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+/* Telemetry & Action Bar inside POV Overlay */
+.seat-pov-bottom-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.seat-pov-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.seat-pov-fallback-canvas {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(180deg, #1e293b 0%, #0f172a 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+}
+
+.fallback-screen {
+  background: #ffffff;
+  color: #0f172a;
+  padding: 18px 24px;
+  font-weight: 800;
+  font-size: 0.85rem;
+  border-radius: 6px;
+  box-shadow: 0 4px 18px rgba(255, 255, 255, 0.2);
+}
+
+.fallback-podium {
+  background: #3b2010;
+  color: #f1f5f9;
+  padding: 8px 14px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 800;
 }
