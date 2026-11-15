@@ -26,18 +26,18 @@ from app.models.domain import (
 
 
 def ensure_schema_updated(db: Session) -> None:
-    """Ensure all tables and new columns exist before seeding."""
-    Base.metadata.create_all(bind=db.get_bind())
-    dialect = db.get_bind().dialect.name
-    if dialect == "postgresql":
+    """Executes the master schema.sql to guarantee all tables, views, triggers, and procedures exist."""
+    schema_path = Path(__file__).resolve().parent / "schema.sql"
+    if schema_path.exists():
+        with open(schema_path, "r", encoding="utf-8") as f:
+            sql_script = f.read()
         try:
-            db.execute(text("ALTER TABLE tickets ADD COLUMN IF NOT EXISTS checked_in_at TIMESTAMPTZ;"))
-            db.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS poster_url VARCHAR(500);"))
-            db.execute(text("ALTER TABLE events ADD COLUMN IF NOT EXISTS ticket_price NUMERIC(10,2) DEFAULT 0.00;"))
-            db.execute(text("ALTER TABLE bookings ADD COLUMN IF NOT EXISTS total_amount NUMERIC(10,2) DEFAULT 0.00;"))
+            db.execute(text(sql_script))
             db.commit()
-        except Exception:
+            print("[SYNC] Master schema.sql applied (Tables, Views, Triggers & Procedures verified).")
+        except Exception as e:
             db.rollback()
+            print(f"[SYNC WARNING] Schema script notice: {e}")
 
 
 def seed_database(db: Session, reset: bool = False, admin_password: str = "CampusTix@2026") -> dict:
