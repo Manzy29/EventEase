@@ -3,19 +3,63 @@
 .DS_Store?
 ._*
 Thumbs.db
+Desktop.ini
 
 # Editors & IDEs
-.vscode/
-!.vscode/extensions.json
+**/.vscode/*
+!**/.vscode/extensions.json
 .idea/
 *.swp
 *.swo
+*~
 
-# Environment variables & secrets
+# Local environment files
 .env
 .env.*
 *.env
 !.env.example
+!.env.*.example
+!*.env.example
+
+# Python bytecode, virtual environments, and tooling
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+*.egg-info/
+
+# Node dependencies and Vite caches
+node_modules/
+.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build and test output
+build/
+dist/
+dist-ssr/
+coverage/
+.coverage
+.coverage.*
+htmlcov/
+
+# Local SQLite databases and sidecar files
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.sqlite3-*
 
 # Logs
 *.log

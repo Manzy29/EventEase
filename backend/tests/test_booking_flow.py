@@ -1,5 +1,13 @@
 """Integration tests for event discovery, seat holds, booking confirmation, and ticket check-in."""
 
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from sqlalchemy import select
+
+from app.models.domain import Booking, BookingOTPVerification, SeatHold
+from app.services.booking import ensure_utc
+
 
 def test_list_events_and_filtering(client, test_seed_data):
     # List all
@@ -29,7 +37,8 @@ def test_get_event_seats(client, test_seed_data):
     assert all(s["status"] == "AVAILABLE" for s in seats)
 
 
-def test_hold_and_confirm_booking_and_checkin(client, test_seed_data):
+def test_hold_and_confirm_booking_and_checkin(client, test_seed_data, monkeypatch):
+    monkeypatch.setattr("app.services.booking.queue_email", lambda *args: None)
     # 1. Sign in as student
     login_res = client.post(
         "/api/v1/auth/login",
@@ -50,7 +59,7 @@ def test_hold_and_confirm_booking_and_checkin(client, test_seed_data):
     assert hold_res.status_code == 201
     hold_id = hold_res.json()["id"]
 
-    # 4. Confirm booking
+    # 4. Start booking and confirm it with the OTP
     book_res = client.post(
         f"/api/v1/events/{event_id}/bookings",
         json={"hold_id": hold_id},
@@ -59,7 +68,15 @@ def test_hold_and_confirm_booking_and_checkin(client, test_seed_data):
     assert book_res.status_code == 201
     booking_data = book_res.json()
     assert "reference" in booking_data
-    assert booking_data["status"] == "CONFIRMED"
+    assert booking_data["status"] == "PENDING"
+    verification = client.post(
+        f"/api/v1/bookings/{booking_data['id']}/verify-otp",
+        params={"hold_id": hold_id},
+        json={"otp": booking_data["dev_otp"]},
+        cookies=student_cookie,
+    )
+    assert verification.status_code == 200
+    assert verification.json()["status"] == "CONFIRMED"
 
     # 5. Check my bookings
     my_bookings_res = client.get("/api/v1/bookings/me", cookies=student_cookie)
@@ -94,3 +111,44 @@ def test_hold_and_confirm_booking_and_checkin(client, test_seed_data):
     )
     assert duplicate_checkin_res.status_code == 409
     assert "already been used" in duplicate_checkin_res.json()["detail"].lower()
+
+
+@pytest.mark.parametrize("expired", ["hold", "otp"])
+def test_expired_pending_booking_disappears(client, db_session, test_seed_data, monkeypatch, expired):
+    monkeypatch.setattr("app.services.booking.queue_email", lambda *args: None)
+    login = client.post("/api/v1/auth/login", json={
+        "email": "student@example.com", "password": "Password1234!",
+    })
+    assert login.status_code == 200
+    event_id = test_seed_data["event"].id
+    seat_id = test_seed_data["event_seats"][0].id
+    hold_response = client.post(f"/api/v1/events/{event_id}/holds", json={"event_seat_ids": [seat_id]})
+    assert hold_response.status_code == 201
+    hold_id = hold_response.json()["id"]
+    pending_response = client.post(f"/api/v1/events/{event_id}/bookings", json={"hold_id": hold_id})
+    assert pending_response.status_code == 201
+    booking_id = pending_response.json()["id"]
+    hold = db_session.get(SeatHold, hold_id)
+    otp = db_session.scalar(select(BookingOTPVerification).where(BookingOTPVerification.booking_id == booking_id))
+    assert ensure_utc(otp.expires_at) == ensure_utc(hold.expires_at)
+    response = client.get("/api/v1/bookings/me")
+    assert response.status_code == 200
+    [pending] = response.json()
+    assert pending["id"] == booking_id
+    assert datetime.fromisoformat(pending["confirmation_expires_at"]) == ensure_utc(hold.expires_at)
+
+    # Check both deadlines independently, including old bookings whose OTP
+    # could remain valid for a few moments after the hold had ended.
+    if expired == "hold":
+        hold.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+        db_session.add(SeatHold(
+            user_id=hold.user_id,
+            event_id=event_id,
+            created_at=ensure_utc(db_session.get(Booking, booking_id).created_at) + timedelta(seconds=1),
+            expires_at=datetime.now(UTC) + timedelta(minutes=5),
+        ))
+    else:
+        otp.expires_at = datetime.now(UTC) - timedelta(seconds=1)
+    db_session.commit()
+    assert client.get("/api/v1/bookings/me").json() == []
+    assert client.get(f"/api/v1/events/{event_id}/pending-booking").json() == {"has_pending": False}

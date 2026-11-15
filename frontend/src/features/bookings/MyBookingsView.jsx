@@ -1,7 +1,9 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { CalendarDays, MapPin, Ticket, AlertCircle, QrCode, X } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { bookingApi } from '../../services/api'
+
+const noBookings = []
 
 function formatDate(value) {
   if (!value) return ''
@@ -24,12 +26,34 @@ export function MyBookingsView({ user, onSignIn, onBrowse, onNotify }) {
   const [confirmSeatModal, setConfirmSeatModal] = useState(null) // Holds specific seat to cancel
   const [qrModalTicket, setQrModalTicket] = useState(null)
   const queryClient = useQueryClient()
+  const userId = user?.id
 
-  const { data: bookings = [], isLoading, isError, error } = useQuery({
-    queryKey: ['my-bookings'],
+  const { data: bookings = noBookings, isLoading, isError, error } = useQuery({
+    queryKey: ['my-bookings', userId],
     queryFn: bookingApi.myBookings,
-    enabled: !!user,
+    enabled: Boolean(userId),
   })
+
+  useEffect(() => {
+    if (!userId) return
+    const deadlines = bookings
+      .filter(({ status }) => status === 'PENDING')
+      .map(({ confirmation_expires_at }) => Date.parse(confirmation_expires_at))
+      .filter(Number.isFinite)
+    if (!deadlines.length) return
+
+    const queryKey = ['my-bookings', userId]
+    const timer = setTimeout(() => {
+      const now = Date.now()
+      queryClient.setQueryData(queryKey, (current) =>
+        current?.filter((booking) => !(
+          booking.status === 'PENDING' && Date.parse(booking.confirmation_expires_at) <= now
+        ))
+      )
+      queryClient.invalidateQueries({ queryKey })
+    }, Math.max(0, Math.min(...deadlines) - Date.now()))
+    return () => clearTimeout(timer)
+  }, [bookings, queryClient, userId])
 
   // Cancel entire booking
   const handleCancelAll = async (booking) => {

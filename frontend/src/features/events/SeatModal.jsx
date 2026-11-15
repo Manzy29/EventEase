@@ -122,6 +122,7 @@ export function SeatModal({ event, user, onClose, onSignIn, onViewBookings }) {
 
       const pending = await eventApi.book(event.id, hold.id)
       setPendingBooking(pending)
+      queryClient.invalidateQueries({ queryKey: ['my-bookings'] })
       setMessage(`Verification OTP sent! (Dev Mode OTP: ${pending.dev_otp})`)
     } catch (error) {
       if (error.response?.status === 401) {

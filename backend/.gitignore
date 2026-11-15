@@ -9,12 +9,6 @@ venv/
 env/
 ENV/
 
-# Environment variables
-.env
-.env.*
-*.env
-!.env.example
-
 # Local databases
 *.db
 *.sqlite
