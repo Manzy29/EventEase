@@ -10,6 +10,7 @@ from app.models.domain import Booking, BookingSeat, BookingStatus, SeatHold, Tic
 from app.schemas.contracts import BookingRequest, HoldRequest, HoldResponse, VerifyBookingOTPRequest
 from app.services.booking import (
     cancel_booking,
+    cancel_booking_seat,
     create_hold,
     get_user_pending_booking,
     initiate_booking,
@@ -85,6 +86,20 @@ def cancel(booking_id: str, db: Db, user: User = Depends(current_user)) -> dict:
     booking = cancel_booking(db, user, booking_id)
     return {"id": booking.id, "status": booking.status.value if hasattr(booking.status, "value") else str(booking.status)}
 
+@router.post("/bookings/{booking_id}/seats/{booking_seat_id}/cancel")
+def cancel_single_seat(
+    booking_id: str,
+    booking_seat_id: str,
+    db: Db,
+    user: User = Depends(current_user),
+) -> dict:
+    """Cancels a single seat from a confirmed booking."""
+    result = cancel_booking_seat(db, user, booking_id, booking_seat_id)
+    return {
+        "status": "success",
+        "message": "Seat cancelled successfully.",
+        **result,
+    }
 
 @router.get("/bookings/me")
 def my_bookings(db: Db, user: User = Depends(current_user)) -> list[dict]:
@@ -99,14 +114,26 @@ def my_bookings(db: Db, user: User = Depends(current_user)) -> list[dict]:
         event = booking.event
         seats_info = []
         tickets_info = []
+        seats_detailed = []
+
         for bs in booking.seats:
-            if bs.released_at is None or booking.status == BookingStatus.CANCELLED:
-                if bs.event_seat and bs.event_seat.venue_seat:
-                    row_lbl = bs.event_seat.venue_seat.row.row_label if bs.event_seat.venue_seat.row else ""
-                    seat_lbl = bs.event_seat.venue_seat.seat_label
-                    seats_info.append(f"{row_lbl}{seat_lbl}")
-                if bs.ticket:
-                    tickets_info.append(bs.ticket.ticket_code)
+            row_lbl = bs.event_seat.venue_seat.row.row_label if bs.event_seat and bs.event_seat.venue_seat and bs.event_seat.venue_seat.row else ""
+            seat_lbl = bs.event_seat.venue_seat.seat_label if bs.event_seat and bs.event_seat.venue_seat else ""
+            label = f"{row_lbl}{seat_lbl}"
+            ticket_code = bs.ticket.ticket_code if bs.ticket else None
+
+            # Only active seats unless whole booking is cancelled
+            if bs.released_at is None:
+                seats_info.append(label)
+                if ticket_code:
+                    tickets_info.append(ticket_code)
+
+            seats_detailed.append({
+                "booking_seat_id": bs.id,
+                "label": label,
+                "ticket_code": ticket_code,
+                "is_active": bs.released_at is None,
+            })
 
         can_cancel = (
             booking.status == BookingStatus.CONFIRMED
@@ -126,6 +153,7 @@ def my_bookings(db: Db, user: User = Depends(current_user)) -> list[dict]:
             "cancelled_at": booking.cancelled_at,
             "seats": seats_info,
             "tickets": tickets_info,
+            "seats_detailed": seats_detailed,  # <--- Provides IDs for individual seat actions
             "can_cancel": can_cancel,
         })
     return result

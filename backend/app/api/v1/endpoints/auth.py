@@ -12,6 +12,12 @@ from app.core.security import create_access_token, hash_password, verify_passwor
 from app.models.domain import EmailVerificationToken, User
 from app.schemas.contracts import LoginRequest, RegisterRequest, UserResponse, VerifyEmailRequest
 from app.services.email import queue_email
+from app.schemas.contracts import ( LoginRequest,
+    RegisterRequest,
+    UpdateProfileRequest,
+    UserResponse,
+    VerifyEmailRequest,
+)
 
 router = APIRouter(prefix="/auth", tags=["authentication"])
 
@@ -93,4 +99,23 @@ def logout(response: Response) -> None:
 
 @router.get("/me", response_model=UserResponse)
 def me(user: User = Depends(current_user)) -> UserResponse:
+    return serialize(user)
+
+@router.put("/profile", response_model=UserResponse)
+def update_profile(
+    payload: UpdateProfileRequest,
+    db: Db,
+    user: User = Depends(current_user),
+) -> UserResponse:
+    """Allows authenticated users to update their name or password."""
+    if payload.full_name is not None and payload.full_name.strip():
+        user.full_name = payload.full_name.strip()
+
+    if payload.new_password:
+        if not payload.current_password or not verify_password(payload.current_password, user.password_hash):
+            raise HTTPException(status_code=400, detail="Current password is incorrect.")
+        user.password_hash = hash_password(payload.new_password)
+
+    db.commit()
+    db.refresh(user)
     return serialize(user)

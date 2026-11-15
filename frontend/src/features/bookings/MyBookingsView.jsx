@@ -21,6 +21,7 @@ function errorMessage(error, fallback) {
 export function MyBookingsView({ user, onSignIn, onBrowse, onNotify }) {
   const [cancellingId, setCancellingId] = useState(null)
   const [confirmModal, setConfirmModal] = useState(null)
+  const [confirmSeatModal, setConfirmSeatModal] = useState(null) // Holds specific seat to cancel
   const [qrModalTicket, setQrModalTicket] = useState(null)
   const queryClient = useQueryClient()
 
@@ -30,7 +31,8 @@ export function MyBookingsView({ user, onSignIn, onBrowse, onNotify }) {
     enabled: !!user,
   })
 
-  const handleCancel = async (booking) => {
+  // Cancel entire booking
+  const handleCancelAll = async (booking) => {
     setCancellingId(booking.id)
     try {
       await bookingApi.cancel(booking.id)
@@ -40,6 +42,23 @@ export function MyBookingsView({ user, onSignIn, onBrowse, onNotify }) {
       setConfirmModal(null)
     } catch (err) {
       onNotify(errorMessage(err, 'Failed to cancel booking.'))
+    } finally {
+      setCancellingId(null)
+    }
+  }
+
+  // Cancel only a particular seat
+  const handleCancelSingleSeat = async (booking, seatItem) => {
+    setCancellingId(seatItem.booking_seat_id)
+    try {
+      await bookingApi.cancelSeat(booking.id, seatItem.booking_seat_id)
+      onNotify(`Seat ${seatItem.label} was cancelled and released.`)
+      queryClient.invalidateQueries({ queryKey: ['my-bookings'] })
+      queryClient.invalidateQueries({ queryKey: ['events'] })
+      queryClient.invalidateQueries({ queryKey: ['seats'] })
+      setConfirmSeatModal(null)
+    } catch (err) {
+      onNotify(errorMessage(err, 'Failed to cancel seat.'))
     } finally {
       setCancellingId(null)
     }
@@ -96,6 +115,10 @@ export function MyBookingsView({ user, onSignIn, onBrowse, onNotify }) {
             const isConfirmed = booking.status === 'CONFIRMED'
             const isCancelled = booking.status === 'CANCELLED'
 
+            // Use detailed seats if available
+            const activeSeatItems = (booking.seats_detailed || [])
+              .filter((s) => s.is_active)
+
             return (
               <article className="booking-card" key={booking.id}>
                 <div className="booking-card-head">
@@ -121,19 +144,34 @@ export function MyBookingsView({ user, onSignIn, onBrowse, onNotify }) {
                     </span>
                   </div>
 
+                  {/* Allocated Seats with individual seat cancel button */}
                   <div className="booking-seats-section">
                     <span className="section-label">Allocated Seats:</span>
                     <div className="seat-tags">
-                      {booking.seats && booking.seats.length > 0 ? (
-                        booking.seats.map((seatLabel) => (
-                          <span className="seat-tag" key={seatLabel}>Seat {seatLabel}</span>
+                      {activeSeatItems.length > 0 ? (
+                        activeSeatItems.map((item) => (
+                          <div className="removable-seat-tag" key={item.booking_seat_id}>
+                            <span>Seat {item.label}</span>
+                            {booking.can_cancel && (
+                              <button
+                                type="button"
+                                className="remove-seat-btn"
+                                onClick={() => setConfirmSeatModal({ booking, seat: item })}
+                                title={`Cancel only Seat ${item.label}`}
+                                aria-label={`Cancel Seat ${item.label}`}
+                              >
+                                <X size={12} />
+                              </button>
+                            )}
+                          </div>
                         ))
                       ) : (
-                        <span className="muted">No seats recorded</span>
+                        <span className="muted">No active seats</span>
                       )}
                     </div>
                   </div>
 
+                  {/* Digital Ticket Badges */}
                   {booking.tickets && booking.tickets.length > 0 && (
                     <div className="booking-tickets-section">
                       <span className="section-label">Digital Ticket Codes:</span>
@@ -141,14 +179,30 @@ export function MyBookingsView({ user, onSignIn, onBrowse, onNotify }) {
                         {booking.tickets.map((code) => (
                           <div
                             key={code}
-                            style={{ display: 'flex', alignItems: 'center', gap: '6px', background: '#f4f6fa', border: '1px solid #dde2ea', padding: '4px 8px', borderRadius: '6px' }}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              background: '#f4f6fa',
+                              border: '1px solid #dde2ea',
+                              padding: '4px 8px',
+                              borderRadius: '6px',
+                            }}
                           >
-                            <span className="ticket-code-badge" style={{ border: 0, padding: 0, background: 'transparent' }}>{code}</span>
+                            <span className="ticket-code-badge" style={{ border: 0, padding: 0, background: 'transparent' }}>
+                              {code}
+                            </span>
                             {isConfirmed && (
                               <button
                                 className="icon-button"
                                 style={{ padding: '2px', background: '#e9e7ff', color: '#5b4ce2', borderRadius: '4px' }}
-                                onClick={() => setQrModalTicket({ ticket_code: code, reference: booking.reference, event_title: booking.event_title })}
+                                onClick={() =>
+                                  setQrModalTicket({
+                                    ticket_code: code,
+                                    reference: booking.reference,
+                                    event_title: booking.event_title,
+                                  })
+                                }
                                 title="View Ticket QR Code"
                                 aria-label="View Ticket QR Code"
                               >
@@ -169,7 +223,7 @@ export function MyBookingsView({ user, onSignIn, onBrowse, onNotify }) {
                         onClick={() => setConfirmModal(booking)}
                         disabled={cancellingId === booking.id}
                       >
-                        {cancellingId === booking.id ? 'Cancelling…' : 'Cancel booking'}
+                        Cancel entire booking
                       </button>
                     )}
                     {isCancelled && booking.cancelled_at && (
@@ -183,16 +237,49 @@ export function MyBookingsView({ user, onSignIn, onBrowse, onNotify }) {
         </div>
       )}
 
+      {/* Modal 1: Confirm Single Seat Cancellation */}
+      {confirmSeatModal && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Confirm single seat cancellation">
+          <div className="auth-modal confirm-modal">
+            <div className="eyebrow auth-eyebrow" style={{ color: '#d32f2f' }}>Cancel Single Seat</div>
+            <h2>Cancel Seat {confirmSeatModal.seat.label}?</h2>
+            <p className="muted">
+              Are you sure you want to cancel <strong>Seat {confirmSeatModal.seat.label}</strong> for <strong>{confirmSeatModal.booking.event_title}</strong>?
+            </p>
+            <p className="muted" style={{ fontSize: '0.84rem' }}>
+              Only this seat will be released back into hall inventory. Any other seats in your booking ({confirmSeatModal.booking.reference}) will remain active.
+            </p>
+            <div className="confirm-modal-actions">
+              <button
+                className="secondary-btn"
+                onClick={() => setConfirmSeatModal(null)}
+                disabled={cancellingId === confirmSeatModal.seat.booking_seat_id}
+              >
+                Keep seat
+              </button>
+              <button
+                className="danger-btn-filled"
+                onClick={() => handleCancelSingleSeat(confirmSeatModal.booking, confirmSeatModal.seat)}
+                disabled={cancellingId === confirmSeatModal.seat.booking_seat_id}
+              >
+                {cancellingId === confirmSeatModal.seat.booking_seat_id ? 'Cancelling…' : `Yes, cancel Seat ${confirmSeatModal.seat.label}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 2: Confirm Entire Booking Cancellation */}
       {confirmModal && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Confirm cancellation">
           <div className="auth-modal confirm-modal">
             <div className="eyebrow auth-eyebrow" style={{ color: '#d32f2f' }}>Cancel Reservation</div>
             <h2>Confirm Cancellation</h2>
             <p className="muted">
-              Are you sure you want to cancel your booking <strong>{confirmModal.reference}</strong> for <strong>{confirmModal.event_title}</strong>?
+              Are you sure you want to cancel your entire booking <strong>{confirmModal.reference}</strong> for <strong>{confirmModal.event_title}</strong>?
             </p>
             <p className="muted" style={{ fontSize: '0.8rem' }}>
-              Your seats ({confirmModal.seats?.join(', ')}) will immediately become available for other students.
+              All your seats ({confirmModal.seats?.join(', ')}) will immediately become available for other students.
             </p>
             <div className="confirm-modal-actions">
               <button
@@ -204,16 +291,17 @@ export function MyBookingsView({ user, onSignIn, onBrowse, onNotify }) {
               </button>
               <button
                 className="danger-btn-filled"
-                onClick={() => handleCancel(confirmModal)}
+                onClick={() => handleCancelAll(confirmModal)}
                 disabled={cancellingId === confirmModal.id}
               >
-                {cancellingId === confirmModal.id ? 'Cancelling…' : 'Yes, cancel booking'}
+                {cancellingId === confirmModal.id ? 'Cancelling…' : 'Yes, cancel all seats'}
               </button>
             </div>
           </div>
         </div>
       )}
 
+      {/* Modal 3: Digital Ticket QR */}
       {qrModalTicket && (
         <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Digital Ticket QR">
           <div className="auth-modal" style={{ textAlign: 'center', maxWidth: '380px' }}>
@@ -225,14 +313,32 @@ export function MyBookingsView({ user, onSignIn, onBrowse, onNotify }) {
             <p className="muted" style={{ marginBottom: '16px' }}>
               Booking: <strong>{qrModalTicket.reference}</strong>
             </p>
-            <div style={{ background: '#ffffff', padding: '16px', borderRadius: '12px', border: '1px solid #e2e8f0', display: 'inline-block', boxShadow: '0 4px 12px rgba(0,0,0,0.06)' }}>
+            <div
+              style={{
+                background: '#ffffff',
+                padding: '16px',
+                borderRadius: '12px',
+                border: '1px solid #e2e8f0',
+                display: 'inline-block',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.06)',
+              }}
+            >
               <img
                 src={`/api/v1/tickets/${qrModalTicket.ticket_code}/qr`}
                 alt="Ticket QR Code"
                 style={{ width: '200px', height: '200px', display: 'block' }}
               />
             </div>
-            <div style={{ marginTop: '14px', fontFamily: 'monospace', fontWeight: 'bold', fontSize: '1rem', letterSpacing: '1px', color: '#5b4ce2' }}>
+            <div
+              style={{
+                marginTop: '14px',
+                fontFamily: 'monospace',
+                fontWeight: 'bold',
+                fontSize: '1rem',
+                letterSpacing: '1px',
+                color: '#5b4ce2',
+              }}
+            >
               {qrModalTicket.ticket_code}
             </div>
             <p className="notice" style={{ marginTop: '12px' }}>

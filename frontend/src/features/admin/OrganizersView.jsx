@@ -10,6 +10,8 @@ import {
   Layers,
   Sparkles,
   Ban,
+  UserCog,
+  ShieldCheck,
 } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { organizerApi, eventApi } from '../../services/api'
@@ -33,6 +35,7 @@ function CreateEventModal({ onClose, onCreated, onNotify }) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [categoryId, setCategoryId] = useState('')
+  const [ticketPrice, setTicketPrice] = useState('0')
   const [venueId, setVenueId] = useState('')
   const [startAt, setStartAt] = useState('')
   const [endAt, setEndAt] = useState('')
@@ -75,6 +78,7 @@ function CreateEventModal({ onClose, onCreated, onNotify }) {
         venue_id: venueId,
         start_at: new Date(startAt).toISOString(),
         end_at: new Date(endAt).toISOString(),
+        ticket_price: parseFloat(ticketPrice) || 0.0,
       })
       onNotify(`Event "${title}" published successfully!`)
       onCreated()
@@ -119,6 +123,19 @@ function CreateEventModal({ onClose, onCreated, onNotify }) {
             rows="3"
             required
             className="styled-textarea"
+          />
+        </label>
+
+        <label>
+          Ticket Price (₹)
+          <input
+            type="number"
+            min="0"
+            step="10"
+            value={ticketPrice}
+            onChange={(e) => setTicketPrice(e.target.value)}
+            placeholder="0 for free campus entry, or e.g. 50"
+            className="styled-select"
           />
         </label>
 
@@ -345,12 +362,15 @@ function BlockSeatsModal({ event, onClose, onNotify }) {
       (acc[seat.row] ||= []).push(seat)
       return acc
     }, {})
-    Object.keys(map).forEach((r) => {
-      map[r].sort((a, b) => a.position - b.position)
-    })
-    return Object.values(map)
-  }, [seats])
 
+    // Sort rows strictly alphabetically (A -> B -> C -> D -> E -> F -> G)
+    const sortedRowKeys = Object.keys(map).sort((a, b) => a.localeCompare(b))
+
+    return sortedRowKeys.map((r) => {
+      return map[r].sort((a, b) => a.position - b.position)
+    })
+  }, [seats])
+  
   const toggleSeat = (seat) => {
     if (seat.status === 'BOOKED') return
     setSelectedSeatIds((prev) =>
@@ -496,12 +516,261 @@ function BlockSeatsModal({ event, onClose, onNotify }) {
   )
 }
 
+function ManageUsersModal({ onClose, onNotify }) {
+  const [updatingId, setUpdatingId] = useState(null)
+  const queryClient = useQueryClient()
+
+  const { data: userList = [], isLoading, isError, error } = useQuery({
+    queryKey: ['admin-users'],
+    queryFn: organizerApi.getUsers,
+  })
+
+  const handleRoleChange = async (targetUser, newRole) => {
+    setUpdatingId(targetUser.id)
+    try {
+      const res = await organizerApi.updateUserRole(targetUser.id, newRole)
+      onNotify(res.message)
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] })
+      queryClient.invalidateQueries({ queryKey: ['account'] })
+    } catch (err) {
+      alert(errorMessage(err, 'Failed to update user role.'))
+    } finally {
+      setUpdatingId(null)
+    }
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Manage Users">
+      <div className="modal attendees-modal" style={{ maxWidth: '820px' }}>
+        <div className="modal-head">
+          <div>
+            <h2>User Management & Organizer Appointments</h2>
+            <div className="muted">Appoint verified students as Event Organizers or revoke privileges</div>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Close">
+            <X />
+          </button>
+        </div>
+
+        <div className="attendees-body">
+          {isLoading ? (
+            <p className="muted loading">Loading user accounts…</p>
+          ) : isError ? (
+            <p className="form-message">Could not load users: {errorMessage(error, 'Error')}</p>
+          ) : (
+            <div className="table-responsive">
+              <table className="attendee-table">
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Current Role</th>
+                    <th>Status</th>
+                    <th style={{ textAlign: 'right' }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {userList.map((u) => {
+                    const isStudent = u.role === 'STUDENT'
+                    const isOrganizer = u.role === 'ORGANIZER'
+                    const isAdmin = u.role === 'ADMIN'
+
+                    return (
+                      <tr key={u.id}>
+                        <td>
+                          <strong>{u.full_name}</strong>
+                          <div className="muted" style={{ fontSize: '0.78rem' }}>{u.email}</div>
+                        </td>
+                        <td>
+                          <span
+                            className={`status-badge-small ${
+                              isAdmin
+                                ? 'status-confirmed'
+                                : isOrganizer
+                                ? 'status-confirmed'
+                                : ''
+                            }`}
+                            style={{
+                              background: isAdmin ? '#f0efff' : isOrganizer ? '#e6f9f0' : '#f1f5f9',
+                              color: isAdmin ? '#5b4ce2' : isOrganizer ? '#16794c' : '#475569',
+                            }}
+                          >
+                            {u.role}
+                          </span>
+                        </td>
+                        <td>
+                          <span style={{ fontSize: '0.78rem', color: u.is_email_verified ? '#16794c' : '#b45309' }}>
+                            {u.is_email_verified ? 'Verified' : 'Unverified'}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: 'right' }}>
+                          {isAdmin ? (
+                            <span className="muted" style={{ fontSize: '0.78rem' }}>System Admin</span>
+                          ) : isStudent ? (
+                            <button
+                              className="primary"
+                              style={{ padding: '6px 12px', fontSize: '0.78rem' }}
+                              disabled={updatingId === u.id}
+                              onClick={() => handleRoleChange(u, 'ORGANIZER')}
+                            >
+                              {updatingId === u.id ? 'Updating…' : 'Appoint as Organizer'}
+                            </button>
+                          ) : (
+                            <button
+                              className="secondary-btn"
+                              style={{ padding: '6px 12px', fontSize: '0.78rem', color: '#c3382b' }}
+                              disabled={updatingId === u.id}
+                              onClick={() => handleRoleChange(u, 'STUDENT')}
+                            >
+                              {updatingId === u.id ? 'Updating…' : 'Revoke Organizer'}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ReportsModal({ onClose }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['dbms-reports'],
+    queryFn: organizerApi.getReports,
+  })
+
+  const downloadCSV = (rows, filename) => {
+    if (!rows || !rows.length) {
+      alert("No report data available to export yet.")
+      return
+    }
+    const keys = Object.keys(rows[0])
+    const csvContent =
+      'data:text/csv;charset=utf-8,' +
+      [
+        keys.join(','),
+        ...rows.map((r) => keys.map((k) => `"${r[k] !== undefined && r[k] !== null ? r[k] : ''}"`).join(',')),
+      ].join('\n')
+
+    const link = document.createElement('a')
+    link.setAttribute('href', encodeURI(csvContent))
+    link.setAttribute('download', filename)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  }
+
+  return (
+    <div className="modal-backdrop" role="dialog" aria-modal="true" aria-label="Analytics & Reports">
+      <div className="modal attendees-modal" style={{ maxWidth: '880px' }}>
+        <div className="modal-head">
+          <div>
+            <h2>Analytics & Reports</h2>
+            <div className="muted">Live data aggregation from PostgreSQL Views and Triggers</div>
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Close">
+            <X />
+          </button>
+        </div>
+
+        <div className="attendees-body">
+          {isLoading ? (
+            <p className="muted loading">Generating analytical reports from database…</p>
+          ) : (
+            <div style={{ display: 'grid', gap: '28px' }}>
+              {/* Report 1 */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <h4 style={{ margin: 0, color: '#172233' }}>Report 1: Event Occupancy & Revenue Summary (View)</h4>
+                  <button
+                    className="secondary-btn"
+                    style={{ fontSize: '0.78rem', padding: '4px 10px' }}
+                    onClick={() => downloadCSV(data?.occupancy_report, 'Event_Occupancy_Report.csv')}
+                  >
+                    Export CSV
+                  </button>
+                </div>
+                <div className="table-responsive">
+                  <table className="attendee-table">
+                    <thead>
+                      <tr>
+                        <th>Event</th>
+                        <th>Bookings</th>
+                        <th>Seats Sold</th>
+                        <th>Cancellations</th>
+                        <th>Revenue (₹)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data?.occupancy_report?.map((r, i) => (
+                        <tr key={i}>
+                          <td><strong>{r.event_title}</strong></td>
+                          <td>{r.confirmed_bookings}</td>
+                          <td>{r.total_seats_booked}</td>
+                          <td>{r.total_cancellations}</td>
+                          <td style={{ color: '#16794c', fontWeight: 700 }}>₹{r.total_revenue}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Report 2 */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                  <h4 style={{ margin: 0, color: '#172233' }}>Report 2: Venue Infrastructure & Capacity Utilization</h4>
+                  <button
+                    className="secondary-btn"
+                    style={{ fontSize: '0.78rem', padding: '4px 10px' }}
+                    onClick={() => downloadCSV(data?.venue_report, 'Venue_Capacity_Report.csv')}
+                  >
+                    Export CSV
+                  </button>
+                </div>
+                <div className="table-responsive">
+                  <table className="attendee-table">
+                    <thead>
+                      <tr>
+                        <th>Venue</th>
+                        <th>Location</th>
+                        <th>Physical Capacity</th>
+                        <th>Events Scheduled</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data?.venue_report?.map((r, i) => (
+                        <tr key={i}>
+                          <td><strong>{r.venue_name}</strong></td>
+                          <td>{r.location}</td>
+                          <td>{r.total_capacity} seats</td>
+                          <td>{r.hosted_events}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [selectedEventForAttendees, setSelectedEventForAttendees] = useState(null)
   const [selectedEventForBlocking, setSelectedEventForBlocking] = useState(null)
-  const [claimingRole, setClaimingRole] = useState(false)
   const [seeding, setSeeding] = useState(false)
+  const [showManageUsersModal, setShowManageUsersModal] = useState(false)
+  const [showReportsModal, setShowReportsModal] = useState(false)
   const queryClient = useQueryClient()
 
   const isOrganizer = user && (user.role === 'ORGANIZER' || user.role === 'ADMIN')
@@ -511,19 +780,6 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
     queryFn: organizerApi.events,
     enabled: !!isOrganizer,
   })
-
-  const handleClaimRole = async () => {
-    setClaimingRole(true)
-    try {
-      await organizerApi.claimRole()
-      await queryClient.invalidateQueries({ queryKey: ['account'] })
-      onNotify('Your account was upgraded to Event Organizer!')
-    } catch (err) {
-      onNotify(errorMessage(err, 'Failed to upgrade role.'))
-    } finally {
-      setClaimingRole(false)
-    }
-  }
 
   if (!user) {
     return (
@@ -568,34 +824,34 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
     )
   }
 
-  if (!isOrganizer) {
-    return (
-      <div className="organizer-page">
-        <div className="portal-hero">
-          <div className="eyebrow" style={{ color: '#5b4ce2' }}>Organizer Access</div>
-          <h2>Become an Event Organizer</h2>
-          <p className="muted">
-            You are currently signed in as <strong>{user.full_name}</strong> ({user.email}) with the <strong>Student</strong> role.
-            The Organizer Portal is reserved for club coordinators and event hosts to publish events.
+if (!isOrganizer) {
+  return (
+    <div className="organizer-page">
+      <div className="portal-hero">
+        <div className="eyebrow" style={{ color: '#5b4ce2' }}>Student Portal</div>
+        <h2>Event Organizer Access</h2>
+        <p className="muted">
+          You are signed in as <strong>{user.full_name}</strong> ({user.email}) with a <strong>Student Account</strong>.
+        </p>
+
+        <div className="role-claim-card" style={{ background: '#f8f9fd', borderColor: '#e2e8f0' }}>
+          <ShieldCheck size={32} style={{ color: '#5b4ce2', margin: '0 auto 10px' }} />
+          <h3 style={{ color: '#172233' }}>Organizer Privileges are Appointed by Admins</h3>
+          <p className="muted" style={{ maxWidth: '520px', margin: '8px auto' }}>
+            To schedule campus events, manage seating plans, and admit students, you must be appointed as an Event Organizer by the system administrator.
           </p>
+          <p className="muted" style={{ fontSize: '0.8rem', marginTop: '12px' }}>
+            Please contact <strong>admin@example.com</strong> or your department coordinator to request organizer access.
+          </p>
+        </div>
 
-          <div className="role-claim-card">
-            <h3>Try the Organizer Dashboard</h3>
-            <p className="muted">
-              For evaluation and local demonstration, you can upgrade your account to an Organizer with one click.
-            </p>
-            <button className="primary" onClick={handleClaimRole} disabled={claimingRole}>
-              {claimingRole ? 'Activating…' : 'Enable Organizer Mode for this Account'}
-            </button>
-          </div>
-
-          <div className="portal-actions" style={{ marginTop: '24px' }}>
-            <button className="text-btn" onClick={onBrowse}>Return to Discover</button>
-          </div>
+        <div className="portal-actions" style={{ marginTop: '24px' }}>
+          <button className="primary" onClick={onBrowse}>Browse Upcoming Events</button>
         </div>
       </div>
-    )
-  }
+    </div>
+  )
+}
 
   const totalEvents = events.length
   const totalBookings = events.reduce((acc, ev) => acc + (ev.total_bookings || 0), 0)
@@ -621,6 +877,7 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
   return (
     <div className="organizer-page">
       <div className="section-top">
+        {/* Left: Title & Subtitle */}
         <div>
           <div className="eyebrow" style={{ color: '#5b4ce2' }}>
             {user.role === 'ADMIN' ? 'Administrator' : 'Organizer'} Portal
@@ -630,16 +887,39 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
             Welcome back, {user.full_name}. Oversee your scheduled events and seating allocations.
           </p>
         </div>
+
+        {/* Right: Action Buttons */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {user.role === 'ADMIN' && (
+            <button
+              className="secondary-btn"
+              onClick={() => setShowManageUsersModal(true)}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+            >
+              <UserCog size={15} />
+              Appoint Organizers
+            </button>
+          )}
+
+          <button
+            className="secondary-btn"
+            onClick={() => setShowReportsModal(true)}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            <Layers size={15} />
+            Analytics & Reports
+          </button>
+
           <button
             className="secondary-btn"
             onClick={() => handleSeedDemoData(true)}
             disabled={seeding}
-            title="Wipe and restore 5 events across 2 venues with sample bookings"
+            title="Wipe and restore demo events"
           >
             <Sparkles size={15} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '6px' }} />
             {seeding ? 'Seeding…' : 'Re-Seed Demo Data'}
           </button>
+
           <button className="primary" onClick={() => setShowCreateModal(true)}>
             <Plus size={16} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '6px' }} />
             Create New Event
@@ -780,6 +1060,15 @@ export function OrganizersView({ user, onSignIn, onBrowse, onNotify }) {
         <BlockSeatsModal
           event={selectedEventForBlocking}
           onClose={() => setSelectedEventForBlocking(null)}
+          onNotify={onNotify}
+        />
+      )}
+      
+      {showReportsModal && <ReportsModal onClose={() => setShowReportsModal(false)} />}
+
+      {showManageUsersModal && (
+        <ManageUsersModal
+          onClose={() => setShowManageUsersModal(false)}
           onNotify={onNotify}
         />
       )}

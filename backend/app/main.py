@@ -67,6 +67,14 @@ def create_application() -> FastAPI:
     @application.post(f"{settings.api_v1_prefix}/system/seed-data", tags=["system"])
     def system_seed_data(reset: bool = False) -> dict:
         """Seed or reset demonstration data (venues, categories, events, demo bookings)."""
+        import sys
+        from pathlib import Path
+
+        # Add the EventEase project root to sys.path so 'database' can be imported
+        project_root = Path(__file__).resolve().parent.parent.parent
+        if str(project_root) not in sys.path:
+            sys.path.insert(0, str(project_root))
+
         from database.seed import seed_database
         with SessionLocal() as db:
             summary = seed_database(db, reset=reset)

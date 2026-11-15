@@ -22,11 +22,14 @@ export const authApi = {
   register: (full_name, email, password) => api.post('/auth/register', { full_name, email, password }).then(({ data }) => data),
   verifyEmail: (email, code) => api.post('/auth/verify-email', { email, code }).then(({ data }) => data),
   logout: () => api.post('/auth/logout'),
+  updateProfile: (data) => api.put('/auth/profile', data).then(({ data }) => data),
 }
 
 export const bookingApi = {
   myBookings: () => api.get('/bookings/me').then(({ data }) => data),
   cancel: (bookingId) => api.post(`/bookings/${bookingId}/cancel`).then(({ data }) => data),
+  cancelSeat: (bookingId, bookingSeatId) =>
+    api.post(`/bookings/${bookingId}/seats/${bookingSeatId}/cancel`).then(({ data }) => data),
 }
 
 export const organizerApi = {
@@ -38,13 +41,15 @@ export const organizerApi = {
   checkInTicket: (ticketCode) => api.post(`/organizer/tickets/${ticketCode}/check-in`).then(({ data }) => data),
   venues: () => api.get('/organizer/venues').then(({ data }) => data),
   categories: () => api.get('/organizer/categories').then(({ data }) => data),
-  claimRole: () => api.post('/organizer/claim-role').then(({ data }) => data),
+  getUsers: () => api.get('/organizer/users').then(({ data }) => data),
+  updateUserRole: (userId, role) => api.put(`/organizer/users/${userId}/role`, { role }).then(({ data }) => data),
   seedDemoData: (reset = false) => api.post('/system/seed-data', null, { params: { reset } }).then(({ data }) => data),
    blockSeats: (eventId, eventSeatIds, isBlocked = true) =>
     api.post(`/organizer/events/${eventId}/block-seats`, {
       event_seat_ids: eventSeatIds,
       is_blocked: isBlocked,
     }).then(({ data }) => data),
+  getReports: () => api.get('/organizer/reports/summary').then(({ data }) => data),
 }
 
 export const systemApi = {

@@ -3,10 +3,10 @@ from datetime import UTC, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import joinedload
 
-from app.api.v1.deps import Db, current_user, organizer_user
+from app.api.v1.deps import Db, admin_user, current_user, organizer_user
 from app.api.v1.endpoints.events import availability_counts
 from app.models.domain import (
     Booking, BookingSeat, BookingStatus, Event, EventCategory, EventSeat, Role, Ticket, User, Venue,
@@ -21,10 +21,14 @@ class CreateEventPayload(BaseModel):
     description: str = Field(min_length=5)
     category_id: str
     venue_id: str
+    ticket_price: float = Field(default=0.0, ge=0.0)  # Price in INR
     start_at: datetime
     end_at: datetime
     cancellation_deadline: datetime | None = None
     poster_url: str | None = None
+
+class UpdateUserRolePayload(BaseModel):
+    role: Role
 
 class BlockSeatsPayload(BaseModel):
     event_seat_ids: list[str]
@@ -43,37 +47,72 @@ def list_categories(db: Db, user: User = Depends(organizer_user)) -> list[dict]:
     return [{"id": c.id, "name": c.name, "description": c.description} for c in categories]
 
 
+import traceback
+
 @router.get("/events")
 def list_organizer_events(db: Db, user: User = Depends(organizer_user)) -> list[dict]:
-    if user.role == Role.ADMIN:
-        statement = select(Event).order_by(Event.start_at.desc())
-    else:
-        statement = select(Event).where(Event.organizer_id == user.id).order_by(Event.start_at.desc())
+    """Retrieve all scheduled events for the organizer or admin."""
+    try:
+        if user.role == Role.ADMIN:
+            statement = select(Event).order_by(Event.start_at.desc())
+        else:
+            statement = select(Event).where(Event.organizer_id == user.id).order_by(Event.start_at.desc())
 
-    events = db.scalars(statement).all()
-    result = []
-    for ev in events:
-        counts = availability_counts(db, ev.id)
-        booking_count = db.scalar(
-            select(func.count()).select_from(Booking).where(Booking.event_id == ev.id)
-        ) or 0
-        result.append({
-            "id": ev.id,
-            "title": ev.title,
-            "description": ev.description,
-            "category": ev.category.name if ev.category else "General",
-            "venue": ev.venue.name if ev.venue else "TBD",
-            "start_at": ev.start_at,
-            "end_at": ev.end_at,
-            "status": ev.status,
-            "total_seats": counts["total"],
-            "available_seats": counts["available"],
-            "booked_seats": counts["booked"],
-            "held_seats": counts["held"],
-            "total_bookings": booking_count,
-        })
-    return result
+        events = db.scalars(statement).all()
+        result = []
+        for ev in events:
+            try:
+                counts = availability_counts(db, ev.id)
+            except Exception as e:
+                print(f"[ERROR] availability_counts failed for event {ev.id}: {e}")
+                counts = {"total": 0, "available": 0, "booked": 0, "held": 0}
 
+            try:
+                booking_count = db.scalar(
+                    select(func.count()).select_from(Booking).where(Booking.event_id == ev.id)
+                ) or 0
+            except Exception as e:
+                print(f"[ERROR] booking count failed for event {ev.id}: {e}")
+                booking_count = 0
+
+            revenue = 0.0
+            try:
+                if hasattr(Booking, "total_amount"):
+                    rev_result = db.scalar(
+                        select(func.sum(Booking.total_amount))
+                        .where(Booking.event_id == ev.id, Booking.status == BookingStatus.CONFIRMED)
+                    )
+                    revenue = float(rev_result) if rev_result is not None else 0.0
+            except Exception:
+                revenue = 0.0
+
+            ticket_price = getattr(ev, "ticket_price", 0.0) or 0.0
+
+            result.append({
+                "id": ev.id,
+                "title": ev.title,
+                "description": ev.description,
+                "category": ev.category.name if ev.category else "General",
+                "venue": ev.venue.name if ev.venue else "TBD",
+                "ticket_price": float(ticket_price),
+                "total_revenue": float(revenue),
+                "start_at": ev.start_at,
+                "end_at": ev.end_at,
+                "status": ev.status,
+                "total_seats": counts.get("total", 0),
+                "available_seats": counts.get("available", 0),
+                "booked_seats": counts.get("booked", 0),
+                "held_seats": counts.get("held", 0),
+                "total_bookings": booking_count,
+            })
+        return result
+
+    except Exception as exc:
+        print("\n" + "!" * 60)
+        print(" [500 ERROR IN LIST_ORGANIZER_EVENTS]")
+        traceback.print_exc()
+        print("!" * 60 + "\n")
+        raise HTTPException(status_code=500, detail=f"Database query error: {str(exc)}")
 
 @router.get("/events/{event_id}/attendees")
 def list_event_attendees(event_id: str, db: Db, user: User = Depends(organizer_user)) -> list[dict]:
@@ -136,6 +175,7 @@ def create_event(payload: CreateEventPayload, db: Db, user: User = Depends(organ
         category_id=category.id,
         venue_id=venue.id,
         organizer_id=user.id,
+        ticket_price=payload.ticket_price,
         start_at=payload.start_at,
         end_at=payload.end_at,
         registration_opens_at=datetime.now(UTC),
@@ -316,8 +356,100 @@ def check_in_ticket(ticket_code: str, db: Db, user: User = Depends(organizer_use
     }
 
 
-@router.post("/claim-role")
-def claim_organizer_role(db: Db, user: User = Depends(current_user)) -> dict:
-    user.role = Role.ORGANIZER
+@router.get("/users")
+def list_all_users(db: Db, user: User = Depends(admin_user)) -> list[dict]:
+    """Admin-only: Retrieve all registered accounts to inspect and manage roles."""
+    users = db.scalars(select(User).order_by(User.created_at.desc())).all()
+    return [
+        {
+            "id": u.id,
+            "full_name": u.full_name,
+            "email": u.email,
+            "role": u.role.value if hasattr(u.role, "value") else str(u.role),
+            "is_active": u.is_active,
+            "is_email_verified": u.is_email_verified,
+            "created_at": u.created_at,
+        }
+        for u in users
+    ]
+
+
+@router.put("/users/{user_id}/role")
+def update_user_role(
+    user_id: str,
+    payload: UpdateUserRolePayload,
+    db: Db,
+    user: User = Depends(admin_user),
+) -> dict:
+    """Admin-only: Appoint an organizer or change user roles."""
+    target_user = db.get(User, user_id)
+    if not target_user:
+        raise HTTPException(status_code=404, detail="User not found.")
+
+    # Prevent admin from accidentally locking themselves out
+    if target_user.id == user.id and payload.role != Role.ADMIN:
+        raise HTTPException(status_code=400, detail="Administrators cannot revoke their own admin rights.")
+
+    target_user.role = payload.role
     db.commit()
-    return {"message": "You are now registered as an event organizer.", "role": user.role.value}
+
+    return {
+        "status": "success",
+        "message": f"Successfully updated {target_user.full_name}'s role to {payload.role.value}.",
+        "user_id": target_user.id,
+        "role": target_user.role.value,
+    }
+
+@router.get("/reports/summary")
+def get_reports_summary(db: Db, user: User = Depends(organizer_user)) -> dict:
+    """Slide 2 Requirement: Generates 2 database analytical reports."""
+    # Report 1: Event Occupancy & Revenue Summary (Queries View with fallback)
+    try:
+        occupancy_data = db.execute(
+            text("SELECT event_title, confirmed_bookings, total_seats_booked, total_cancellations, total_revenue FROM EventBookingSummary")
+        ).mappings().all()
+    except Exception:
+        db.rollback()
+        # Direct SQL fallback if the view is not yet compiled in PostgreSQL
+        occupancy_data = db.execute(
+            text("""
+                SELECT 
+                    e.title AS event_title,
+                    count(DISTINCT b.id) FILTER (WHERE b.status = 'CONFIRMED') AS confirmed_bookings,
+                    count(DISTINCT bs.id) FILTER (WHERE bs.released_at IS NULL) AS total_seats_booked,
+                    count(DISTINCT c.id) AS total_cancellations,
+                    coalesce(sum(b.total_amount) FILTER (WHERE b.status = 'CONFIRMED'), 0.00) AS total_revenue
+                FROM events e
+                LEFT JOIN bookings b ON b.event_id = e.id
+                LEFT JOIN booking_seats bs ON bs.booking_id = b.id
+                LEFT JOIN cancellations c ON c.booking_id = b.id
+                GROUP BY e.id, e.title
+                ORDER BY total_revenue DESC
+            """)
+        ).mappings().all()
+
+    # Report 2: Venue Infrastructure & Capacity Utilization
+    try:
+        venue_data = db.execute(
+            text("""
+                SELECT 
+                    v.name AS venue_name, 
+                    coalesce(v.location, 'Campus') AS location, 
+                    count(DISTINCT vs.id) AS total_capacity, 
+                    count(DISTINCT e.id) AS hosted_events
+                FROM venues v
+                LEFT JOIN venue_rows vr ON vr.venue_id = v.id
+                LEFT JOIN venue_seats vs ON vs.venue_row_id = vr.id
+                LEFT JOIN events e ON e.venue_id = v.id
+                GROUP BY v.id, v.name, v.location
+                ORDER BY total_capacity DESC
+            """)
+        ).mappings().all()
+    except Exception as exc:
+        print(f"[REPORT 2 ERROR]: {exc}")
+        venue_data = []
+
+    return {
+        "occupancy_report": [dict(r) for r in occupancy_data],
+        "venue_report": [dict(r) for r in venue_data],
+    }
