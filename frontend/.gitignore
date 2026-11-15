@@ -12,11 +12,8 @@ node_modules
 dist
 dist-ssr
 
-# Environment files
-.env
-.env.*
+# Local overrides
 *.local
-!.env.example
 
 # Coverage
 coverage/

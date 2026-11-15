@@ -38,24 +38,26 @@ def event_data(db: Db, event: Event) -> EventListItem:
    
 
 @router.get("", response_model=list[EventListItem])
-def list_events(db: Db, search: str | None = None, category: str | None = None, limit: int = Query(24, le=100)) -> list[EventListItem]:
-    """List only upcoming, active events. Concluded/expired events are automatically hidden."""
+def list_events(
+    db: Db,
+    search: str | None = None,
+    category: str | None = None,
+    limit: int = Query(24, le=100),
+    past: bool = False,
+) -> list[EventListItem]:
+    """List published events that haven't ended, or past events when requested."""
     current_time = datetime.now(UTC)
-    statement = (
-        select(Event)
-        .where(
-            Event.status == "PUBLISHED",
-            Event.end_at > current_time  # <--- Automatically hides expired events
-        )
-        .order_by(Event.start_at)
-        .limit(limit)
-    )
+    statement = select(Event).where(Event.status == "PUBLISHED")
+    if past:
+        statement = statement.where(Event.end_at <= current_time).order_by(Event.end_at.desc(), Event.id)
+    else:
+        statement = statement.where(Event.end_at > current_time).order_by(Event.start_at)
     if search:
         statement = statement.where(Event.title.ilike(f"%{search.strip()}%"))
     if category:
         statement = statement.join(Event.category).where(func.lower(EventCategory.name) == category.lower())
 
-    return [event_data(db, event) for event in db.scalars(statement).unique().all()]
+    return [event_data(db, event) for event in db.scalars(statement.limit(limit)).unique().all()]
 
 @router.get("/{event_id}", response_model=EventListItem)
 def get_event(event_id: str, db: Db) -> EventListItem:

@@ -8,7 +8,7 @@ import hashlib
 import secrets
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.config import get_settings
@@ -41,6 +41,33 @@ def expire_holds(db: Session, event_id: str | None = None) -> None:
     db.execute(query.values(status=HoldStatus.EXPIRED))
 
 
+def pending_booking_expirations():
+    # The schema has no booking-to-hold FK. A hold created after a booking
+    # cannot keep that booking visible or let the user resume it.
+    hold_expires_at = (
+        select(func.max(SeatHold.expires_at))
+        .where(
+            SeatHold.user_id == Booking.user_id,
+            SeatHold.event_id == Booking.event_id,
+            SeatHold.created_at <= Booking.created_at,
+            SeatHold.status == HoldStatus.ACTIVE,
+        )
+        .correlate(Booking)
+        .scalar_subquery()
+    )
+    otp_expires_at = (
+        select(func.max(BookingOTPVerification.expires_at))
+        .where(
+            BookingOTPVerification.booking_id == Booking.id,
+            BookingOTPVerification.consumed_at.is_(None),
+            BookingOTPVerification.attempt_count < 5,
+        )
+        .correlate(Booking)
+        .scalar_subquery()
+    )
+    return hold_expires_at, otp_expires_at
+
+
 def create_hold(db: Session, user: User, event_id: str, seat_ids: list[str]) -> SeatHold:
     settings = get_settings()
     unique_ids = sorted(set(seat_ids))
@@ -55,6 +82,9 @@ def create_hold(db: Session, user: User, event_id: str, seat_ids: list[str]) -> 
         if not user.is_email_verified or not user.is_active:
             raise HTTPException(status_code=403, detail="A verified active account is required to reserve seats.")
         current_time = now()
+        event_end = ensure_utc(event.end_at)
+        if event_end is not None and event_end <= current_time:
+            raise HTTPException(status_code=400, detail="This event has ended.")
         reg_opens = ensure_utc(event.registration_opens_at)
         reg_closes = ensure_utc(event.registration_closes_at)
         if reg_opens and current_time < reg_opens:
@@ -93,7 +123,8 @@ def initiate_booking(db: Session, user: User, event_id: str, hold_id: str) -> tu
             select(SeatHold).options(selectinload(SeatHold.items)).where(SeatHold.id == hold_id).with_for_update()
         )
         expires_at = ensure_utc(hold.expires_at) if hold else None
-        if not hold or hold.user_id != user.id or hold.event_id != event_id or hold.status != HoldStatus.ACTIVE or (expires_at and expires_at <= now()):
+        current_time = now()
+        if not hold or not expires_at or hold.user_id != user.id or hold.event_id != event_id or hold.status != HoldStatus.ACTIVE or expires_at <= current_time:
             raise HTTPException(status_code=409, detail="This reservation hold is unavailable or expired.")
 
         reference = f"CTX-{secrets.token_hex(5).upper()}"
@@ -106,12 +137,11 @@ def initiate_booking(db: Session, user: User, event_id: str, hold_id: str) -> tu
         db.add(booking)
         db.flush()
 
-        # Generate 6-digit OTP code valid for 5 minutes
         otp_code = f"{secrets.randbelow(1_000_000):06d}"
         otp_record = BookingOTPVerification(
             booking_id=booking.id,
             otp_hash=token_hash(otp_code),
-            expires_at=now() + timedelta(minutes=5),
+            expires_at=min(expires_at, current_time + timedelta(minutes=5)),
         )
         db.add(otp_record)
 
@@ -122,7 +152,7 @@ def initiate_booking(db: Session, user: User, event_id: str, hold_id: str) -> tu
             "BOOKING_OTP",
             {
                 "subject": f"Confirm your booking {reference}",
-                "html": f"<p>Your confirmation OTP is <strong>{otp_code}</strong>. Valid for 5 minutes.</p>",
+                "html": f"<p>Your confirmation OTP is <strong>{otp_code}</strong>. Enter it before your seat hold expires.</p>",
             },
         )
     db.refresh(booking)
@@ -170,7 +200,7 @@ def verify_booking_otp_and_confirm(
             .where(BookingOTPVerification.booking_id == booking.id, BookingOTPVerification.consumed_at.is_(None))
             .order_by(BookingOTPVerification.created_at.desc())
         )
-        if not otp_record or otp_record.expires_at <= now() or otp_record.attempt_count >= 5:
+        if not otp_record or ensure_utc(otp_record.expires_at) <= now() or otp_record.attempt_count >= 5:
             raise HTTPException(status_code=400, detail="The OTP code is invalid or expired.")
 
         otp_record.attempt_count += 1
@@ -209,31 +239,36 @@ def verify_booking_otp_and_confirm(
 
 def get_user_pending_booking(db: Session, user: User, event_id: str) -> dict | None:
     """Checks if the user has an unexpired PENDING booking and active SeatHold for this event."""
-    expire_holds(db, event_id)
-
-    # 1. Look for a PENDING booking for this user on this event
-    booking = db.scalar(
-        select(Booking)
+    current_time = now()
+    hold_expires_at, otp_expires_at = pending_booking_expirations()
+    row = db.execute(
+        select(Booking, otp_expires_at)
         .where(
             Booking.user_id == user.id,
             Booking.event_id == event_id,
             Booking.status == BookingStatus.PENDING,
+            hold_expires_at > current_time,
+            otp_expires_at > current_time,
         )
-        .order_by(Booking.created_at.desc())
-    )
-    if not booking:
+        .order_by(Booking.created_at.desc(), Booking.id)
+        .limit(1)
+    ).one_or_none()
+    if row is None:
         return None
+    booking, otp_deadline = row
 
-    # 2. Look for the matching active hold that hasn't expired
     hold = db.scalar(
         select(SeatHold)
         .options(selectinload(SeatHold.items))
         .where(
             SeatHold.user_id == user.id,
             SeatHold.event_id == event_id,
+            SeatHold.created_at <= booking.created_at,
             SeatHold.status == HoldStatus.ACTIVE,
-            SeatHold.expires_at > now(),
+            SeatHold.expires_at > current_time,
         )
+        .order_by(SeatHold.expires_at.desc(), SeatHold.id)
+        .limit(1)
     )
     if not hold:
         return None
@@ -243,7 +278,7 @@ def get_user_pending_booking(db: Session, user: User, event_id: str) -> dict | N
         "booking_id": booking.id,
         "reference": booking.booking_reference,
         "hold_id": hold.id,
-        "expires_at": hold.expires_at.isoformat(),
+        "expires_at": min(ensure_utc(hold.expires_at), ensure_utc(otp_deadline)).isoformat(),
         "seat_ids": [item.event_seat_id for item in hold.items],
     }
 

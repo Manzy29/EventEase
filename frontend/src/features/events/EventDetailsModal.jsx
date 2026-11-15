@@ -12,7 +12,7 @@ function formatDateTime(value) {
   }).format(new Date(value))
 }
 
-export function EventDetailsModal({ event, onClose, onSelectSeats }) {
+export function EventDetailsModal({ event, ended, onClose, onSelectSeats }) {
   if (!event) return null
 
   return (
@@ -21,7 +21,9 @@ export function EventDetailsModal({ event, onClose, onSelectSeats }) {
         <div className="modal-head">
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <span className="category-tag">{event.category}</span>
-            <span className="availability" style={{ fontSize: '0.8rem' }}>{event.available_seats} seats left</span>
+            {ended ? <span className="muted">Ended</span> : (
+              <span className="availability" style={{ fontSize: '0.8rem' }}>{event.available_seats} seats left</span>
+            )}
           </div>
           <button className="icon-button" onClick={onClose} aria-label="Close">
             <X />
@@ -63,16 +65,18 @@ export function EventDetailsModal({ event, onClose, onSelectSeats }) {
             <button className="secondary-btn full" onClick={onClose}>
               Close
             </button>
-            <button
-              className="primary full"
-              onClick={() => {
-                onClose()
-                onSelectSeats(event)
-              }}
-              style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
-            >
-              <Ticket size={16} /> Select seats
-            </button>
+            {!ended && (
+              <button
+                className="primary full"
+                onClick={() => {
+                  onClose()
+                  onSelectSeats(event)
+                }}
+                style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+              >
+                <Ticket size={16} /> Select seats
+              </button>
+            )}
           </div>
         </div>
       </div>

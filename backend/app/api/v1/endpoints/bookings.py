@@ -3,7 +3,7 @@ import io
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 import qrcode
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from app.api.v1.deps import Db, current_user
 from app.models.domain import Booking, BookingSeat, BookingStatus, SeatHold, Ticket, User
@@ -12,8 +12,10 @@ from app.services.booking import (
     cancel_booking,
     cancel_booking_seat,
     create_hold,
+    ensure_utc,
     get_user_pending_booking,
     initiate_booking,
+    pending_booking_expirations,
     verify_booking_otp_and_confirm,
 )
 
@@ -103,15 +105,30 @@ def cancel_single_seat(
 
 @router.get("/bookings/me")
 def my_bookings(db: Db, user: User = Depends(current_user)) -> list[dict]:
-    bookings = db.scalars(
-        select(Booking)
-        .where(Booking.user_id == user.id)
+    current_time = datetime.now(UTC)
+    hold_expires_at, otp_expires_at = pending_booking_expirations()
+    bookings = db.execute(
+        select(Booking, hold_expires_at, otp_expires_at)
+        .where(
+            Booking.user_id == user.id,
+            or_(
+                Booking.status.in_((BookingStatus.CONFIRMED, BookingStatus.CANCELLED)),
+                (Booking.status == BookingStatus.PENDING)
+                & (hold_expires_at > current_time)
+                & (otp_expires_at > current_time),
+            ),
+        )
         .order_by(Booking.created_at.desc())
     ).all()
-    current_time = datetime.now(UTC)
     result = []
-    for booking in bookings:
+    for booking, hold_deadline, otp_deadline in bookings:
         event = booking.event
+        cancellation_deadline = ensure_utc(event.cancellation_deadline) if event else None
+        confirmation_expires_at = (
+            min(ensure_utc(hold_deadline), ensure_utc(otp_deadline))
+            if booking.status == BookingStatus.PENDING
+            else None
+        )
         seats_info = []
         tickets_info = []
         seats_detailed = []
@@ -137,7 +154,7 @@ def my_bookings(db: Db, user: User = Depends(current_user)) -> list[dict]:
 
         can_cancel = (
             booking.status == BookingStatus.CONFIRMED
-            and (not event or not event.cancellation_deadline or current_time <= event.cancellation_deadline)
+            and (cancellation_deadline is None or current_time <= cancellation_deadline)
         )
 
         result.append({
@@ -151,6 +168,7 @@ def my_bookings(db: Db, user: User = Depends(current_user)) -> list[dict]:
             "end_at": event.end_at if event else None,
             "created_at": booking.created_at,
             "cancelled_at": booking.cancelled_at,
+            "confirmation_expires_at": confirmation_expires_at,
             "seats": seats_info,
             "tickets": tickets_info,
             "seats_detailed": seats_detailed,  # <--- Provides IDs for individual seat actions

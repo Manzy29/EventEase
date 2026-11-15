@@ -14,8 +14,13 @@ import { ProfileView } from '../features/profile/ProfileView'
 const categories = ['All', 'Technical', 'Cultural', 'Workshop', 'Seminar', 'Hackathon', 'Sports']
 const palette = ['one', 'two', 'three', 'four', 'five', 'six']
 
-function formatDate(value) {
-  return new Intl.DateTimeFormat('en-IN', { day: 'numeric', month: 'short', weekday: 'short' }).format(new Date(value))
+function formatDate(value, includeYear = false) {
+  return new Intl.DateTimeFormat('en-IN', {
+    day: 'numeric',
+    month: 'short',
+    weekday: 'short',
+    year: includeYear ? 'numeric' : undefined,
+  }).format(new Date(value))
 }
 
 function errorMessage(error, fallback) {
@@ -36,8 +41,19 @@ function DiscoverView({ onBook, onViewDetails }) {
     queryFn: () => eventApi.list(queryParams),
     retry: false,
   })
+  const pastParams = { ...queryParams, past: true }
+  const past = useQuery({
+    queryKey: ['events', pastParams],
+    queryFn: () => eventApi.list(pastParams),
+    retry: false,
+  })
 
   const events = remote.data || []
+  const pastEvents = past.data || []
+  const groups = [
+    { title: 'Upcoming events', items: events, ended: false },
+    { title: 'Past events', items: pastEvents, ended: true },
+  ].filter(({ items }) => items.length)
 
   return (
     <>
@@ -75,7 +91,7 @@ function DiscoverView({ onBook, onViewDetails }) {
       <main className="content">
         <div className="section-top">
           <div>
-            <h2 className="section-title">Upcoming on campus</h2>
+            <h2 className="section-title">Events on campus</h2>
             <p className="section-copy">Make a plan. Your next good story starts here.</p>
           </div>
           <div className="search">
@@ -101,7 +117,7 @@ function DiscoverView({ onBook, onViewDetails }) {
           ))}
         </div>
 
-        {remote.isLoading ? (
+        {remote.isLoading || past.isLoading ? (
           <div className="skeleton-grid">
             {[1, 2, 3, 4, 5, 6].map((i) => (
               <div className="skeleton-card" key={i}>
@@ -114,77 +130,87 @@ function DiscoverView({ onBook, onViewDetails }) {
               </div>
             ))}
           </div>
-        ) : remote.isError ? (
+        ) : remote.isError || past.isError ? (
           <div className="empty">
             <strong>Unable to reach the booking service.</strong>
             <br />
-            Start the API on port 8000, then refresh. {errorMessage(remote.error, '')}
+            Start the API on port 8000, then refresh. {errorMessage(remote.error || past.error, '')}
           </div>
-        ) : (
-          <section className="grid">
-            {events.length ? (
-              events.map((event, index) => (
-                <article className="event-card" key={event.id}>
-                  <div
-                    className={`poster ${palette[index % palette.length]}`}
-                    onClick={() => onViewDetails(event)}
-                    style={{ cursor: 'pointer' }}
-                    title="Click to view event details"
-                  >
-                    <small>{event.category}</small>
-                    <span className="ticket-icon"><Ticket size={21} /></span>
-                  </div>
-                  <div className="event-info">
-                    <h3
-                      onClick={() => onViewDetails(event)}
+        ) : groups.length ? (
+          groups.map(({ title, items, ended }) => (
+            <section className="event-group" key={title}>
+              <h3>{title}</h3>
+              <div className="grid">
+                {items.map((event, index) => (
+                  <article className="event-card" key={event.id}>
+                    <div
+                      className={`poster ${palette[index % palette.length]}`}
+                      onClick={() => onViewDetails(event, ended)}
                       style={{ cursor: 'pointer' }}
                       title="Click to view event details"
                     >
-                      {event.title}
-                    </h3>
-                    <div className="event-meta">
-                      <span><CalendarDays size={13} /> {formatDate(event.start_at)}</span>
-                      <span><MapPin size={13} /> {event.venue}</span>
+                      <small>{event.category}</small>
+                      <span className="ticket-icon"><Ticket size={21} /></span>
                     </div>
-                    <div className="event-footer">
-                      <span className="availability">{event.available_seats} seats left</span>
-                      <div style={{ display: 'flex', gap: '6px' }}>
-                        <button
-                          className="icon-button"
-                          onClick={() => onViewDetails(event)}
-                          title="Event details"
-                          aria-label="Event details"
-                          style={{ padding: '6px' }}
-                        >
-                          <Info size={15} />
-                        </button>
-                        <button onClick={() => onBook(event)}>
-                          Book <ChevronRight size={14} />
-                        </button>
+                    <div className="event-info">
+                      <h4
+                        onClick={() => onViewDetails(event, ended)}
+                        style={{ cursor: 'pointer' }}
+                        title="Click to view event details"
+                      >
+                        {event.title}
+                      </h4>
+                      <div className="event-meta">
+                        <span><CalendarDays size={13} /> {formatDate(event.start_at, ended)}</span>
+                        <span><MapPin size={13} /> {event.venue}</span>
+                      </div>
+                      <div className="event-footer">
+                        {ended ? <span className="muted">Ended</span> : (
+                          <span className="availability">{event.available_seats} seats left</span>
+                        )}
+                        <div style={{ display: 'flex', gap: '6px' }}>
+                          <button
+                            className="icon-button"
+                            onClick={() => onViewDetails(event, ended)}
+                            title="Event details"
+                            aria-label="Event details"
+                            style={{ padding: '6px' }}
+                          >
+                            <Info size={15} />
+                          </button>
+                          {!ended && (
+                            <button onClick={() => onBook(event)}>
+                              Book <ChevronRight size={14} />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </article>
-              ))
-            ) : (
-              <div className="empty" style={{ padding: '36px 20px', textAlign: 'center' }}>
-                <p className="muted" style={{ marginBottom: '16px' }}>No events match your current filter or database is unseeded.</p>
-                <button
-                  className="primary"
-                  onClick={async () => {
-                    try {
-                      await systemApi.seed(false)
-                      remote.refetch()
-                    } catch (e) {
-                      console.error('Seed error:', e)
-                    }
-                  }}
-                >
-                  <Sparkles size={16} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '6px' }} />
-                  Load Demonstration Events
-                </button>
+                  </article>
+                ))}
               </div>
-            )}
+            </section>
+          ))
+        ) : (
+          <section className="grid">
+            <div className="empty" style={{ padding: '36px 20px', textAlign: 'center' }}>
+              <p className="muted" style={{ marginBottom: '16px' }}>No events match your current filter or database is unseeded.</p>
+              <button
+                className="primary"
+                onClick={async () => {
+                  try {
+                    await systemApi.seed(false)
+                    remote.refetch()
+                    past.refetch()
+                  } catch (e) {
+                    console.error('Seed error:', e)
+                  }
+                }}
+              >
+                <Sparkles size={16} style={{ display: 'inline', verticalAlign: '-2px', marginRight: '6px' }} />
+                Load Demonstration Events
+              </button>
+            </div>
           </section>
         )}
       </main>
@@ -236,7 +262,7 @@ function CampusTix() {
             <DiscoverView
               user={user}
               onBook={(ev) => setBooking(ev)}
-              onViewDetails={(ev) => setDetailsEvent(ev)}
+              onViewDetails={(event, ended = false) => setDetailsEvent({ event, ended })}
               onSignIn={() => setAuthMode('login')}
             />
           }
@@ -301,7 +327,8 @@ function CampusTix() {
 
       {detailsEvent && (
         <EventDetailsModal
-          event={detailsEvent}
+          event={detailsEvent.event}
+          ended={detailsEvent.ended}
           onClose={() => setDetailsEvent(null)}
           onSelectSeats={(ev) => setBooking(ev)}
         />
