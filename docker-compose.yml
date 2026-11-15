@@ -9,6 +9,7 @@ services:
       - "5432:5432"
     volumes:
       - campustix-postgres:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/init.sql 
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U campustix -d campustix"]
       interval: 5s
