@@ -410,24 +410,24 @@ def get_reports_summary(db: Db, user: User = Depends(organizer_user)) -> dict:
         ).mappings().all()
     except Exception:
         db.rollback()
-        # Direct SQL fallback if the view is not yet compiled in PostgreSQL
         occupancy_data = db.execute(
             text("""
-                SELECT 
+                SELECT
                     e.title AS event_title,
-                    count(DISTINCT b.id) FILTER (WHERE b.status = 'CONFIRMED') AS confirmed_bookings,
-                    count(DISTINCT bs.id) FILTER (WHERE bs.released_at IS NULL) AS total_seats_booked,
-                    count(DISTINCT c.id) AS total_cancellations,
-                    coalesce(sum(b.total_amount) FILTER (WHERE b.status = 'CONFIRMED'), 0.00) AS total_revenue
+                    (SELECT count(*) FROM bookings b
+                     WHERE b.event_id = e.id AND b.status = 'CONFIRMED') AS confirmed_bookings,
+                    (SELECT count(*) FROM booking_seats bs
+                     JOIN bookings b ON b.id = bs.booking_id
+                     WHERE b.event_id = e.id AND b.status = 'CONFIRMED' AND bs.released_at IS NULL) AS total_seats_booked,
+                    (SELECT count(*) FROM cancellations c
+                     JOIN bookings b ON b.id = c.booking_id
+                     WHERE b.event_id = e.id) AS total_cancellations,
+                    (SELECT coalesce(sum(b.total_amount), 0.00) FROM bookings b
+                     WHERE b.event_id = e.id AND b.status = 'CONFIRMED') AS total_revenue
                 FROM events e
-                LEFT JOIN bookings b ON b.event_id = e.id
-                LEFT JOIN booking_seats bs ON bs.booking_id = b.id
-                LEFT JOIN cancellations c ON c.booking_id = b.id
-                GROUP BY e.id, e.title
                 ORDER BY total_revenue DESC
             """)
         ).mappings().all()
-
     # Report 2: Venue Infrastructure & Capacity Utilization
     try:
         venue_data = db.execute(

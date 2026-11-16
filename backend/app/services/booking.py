@@ -345,6 +345,9 @@ def cancel_booking_seat(
 
         # Check if all seats in the booking are now cancelled
         active_remaining = [s for s in booking.seats if s.released_at is None]
+        unit_price = float(getattr(event, "ticket_price", 0.0) or 0.0) if event else 0.0
+        booking.total_amount = float(len(active_remaining) * unit_price)
+
         all_cancelled = len(active_remaining) == 0
         if all_cancelled:
             booking.status = BookingStatus.CANCELLED
